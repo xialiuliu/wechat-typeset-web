@@ -230,16 +230,213 @@ def is_short_heading(line: str, prev_line: str, next_line: str) -> bool:
     return False
 
 
+# ── 段落内分块：识别大段文字中的章节标题并切分 ──
+
+# 章节标题在段落中的模式（用于切分大段文字）
+# 匹配：一、xxx 或 第一章 xxx 或 第x节 xxx 或 结语 等
+INLINE_SECTION_RE = re.compile(
+    r'(?<=[。！？\n])\s*'
+    r'(?:'
+    r'[一二三四五六七八九十百]+[、．.．]\s*[^，。！？\n]{2,20}'  # 一、修行从觉知自己开始
+    r'|第[一二三四五六七八九十百]+[章节篇]\s*[^，。！？\n]{2,20}'  # 第一章 修行从觉知自己开始
+    r'|(?:结语|结语：|结束语|后记|写在最后|总结)\s*[^，。！？\n]{0,20}'  # 结语
+    r')'
+    r'(?=[，。！？：；]|$|\n)'
+)
+
+# 结语/总结等结尾标记
+CONCLUSION_RE = re.compile(r'(?:结语|结语：|结束语|后记|写在最后|总结语?)')
+
+# 章节标题前缀模式（用于在段落中查找标题位置）
+SECTION_PREFIX_RE = re.compile(r'[一二三四五六七八九十百]+[、．.．]')
+SECTION_NUM_PREFIX_RE = re.compile(r'第[一二三四五六七八九十百]+[章节篇]')
+
+
+def extract_heading(text: str, start: int, prefix_len: int) -> tuple:
+    """
+    从标题前缀位置提取完整的标题文本。
+    策略：
+    1. 先尝试找到标题的"自然结尾"——标点后紧跟正文指示词
+    2. 中文标题中逗号/冒号可保留（如"既不迷失，也不紧盯"）
+    3. 句号/感叹号/问号一定截断
+    4. 逗号后如果紧跟正文指示词则截断，否则保留（属于标题一部分）
+    返回 (heading_text, end_pos)
+    """
+    # 标题内容从前缀后开始
+    content_start = start + prefix_len
+    content = text[content_start:]
+
+    # ── 正文指示词（出现在标题后，明确标志正文开始） ──
+    # 短词：1-2字，紧跟标题后
+    body_starters_short = [
+        '我们', '他们', '她们', '大家', '人们', '人们',
+        '有些', '许多', '很多', '还有', '但是', '然而', '因此', '所以',
+        '如果', '因为', '虽然', '不过', '而且', '并且', '而是',
+        '这样', '那样', '这些', '那些', '这个', '那个',
+        '其实', '首先', '最初', '最终', '最后', '进一步',
+        '甚至', '只是', '如此', '当心', '就像', '对于',
+        '真正', '往往', '始终', '一直', '渐渐', '慢慢',
+        '如果', '可以', '应该', '必须', '需要', '能够',
+        '不再', '还是', '也是', '又是', '也不是',
+    ]
+    # 短语：3+字，紧跟标题后
+    body_starters_phrase = [
+        '在日常生活中', '很多人', '修行人', '修行时', '修行路上',
+        '开示说', '隆波说', '师父说', '老师说',
+        '当我们', '们看到', '还有一个', '也是如此',
+        '最重要的是', '关键是', '核心是',
+        '最常见的', '最容易', '最常见',
+    ]
+    # 人名/称谓（可能出现在标题和正文之间，如"七、xxx隆波开示说"）
+    name_stoppers = ['隆波', '师父', '老师', '尊者', '法师', '大师', '禅师', '仁波切']
+
+    # ── 策略：逐步扫描，判断每个标点是否是标题边界 ──
+    # 找到所有候选截断点（标点位置）
+    max_heading_len = 22  # 标题最大长度（含前缀内容）
+
+    best_cut = len(content)  # 默认截到末尾
+
+    # 先检查句号/感叹号/问号/分号——这些一定是截断点
+    for punct in '。！？；':
+        pos = content.find(punct)
+        if pos != -1 and pos < best_cut and pos > 0:
+            best_cut = pos
+
+    # 检查正文指示词（短语优先，因为更精确）
+    for phrase in body_starters_phrase:
+        pos = content.find(phrase)
+        if pos != -1 and pos < best_cut and pos > 0:
+            best_cut = pos
+
+    # 检查人名/称谓
+    for name in name_stoppers:
+        pos = content.find(name)
+        if pos != -1 and pos < best_cut and pos > 0:
+            best_cut = pos
+
+    # 检查短词指示词（但需要更谨慎——短词可能在标题内部）
+    for word in body_starters_short:
+        pos = content.find(word)
+        if pos != -1 and pos < best_cut and pos > 0:
+            # 短词只有在标题已经足够长(>6字)时才截断
+            # 或者短词紧跟在标点后面
+            if pos > 6 or (pos > 0 and content[pos - 1] in '，,：:、'):
+                best_cut = pos
+
+    # ── 逗号特殊处理 ──
+    # 逗号可能是标题内部分隔（如"既不迷失，也不紧盯"）也可能是标题-正文边界
+    # 规则：如果逗号后紧跟正文指示词，则在此逗号处截断；否则保留
+    for m in re.finditer('，', content):
+        comma_pos = m.start()
+        if comma_pos >= best_cut or comma_pos == 0:
+            continue
+        after_comma = content[comma_pos + 1:]
+        # 检查逗号后是否紧跟正文指示词
+        is_boundary = False
+        for phrase in body_starters_phrase:
+            if after_comma.startswith(phrase):
+                is_boundary = True
+                break
+        if not is_boundary:
+            for name in name_stoppers:
+                if after_comma.startswith(name):
+                    is_boundary = True
+                    break
+        if not is_boundary:
+            for word in body_starters_short:
+                if after_comma.startswith(word) and comma_pos > 6:
+                    is_boundary = True
+                    break
+        if is_boundary and comma_pos < best_cut:
+            best_cut = comma_pos
+
+    # ── 最终截取 ──
+    heading_content = content[:best_cut].strip()
+
+    # 限制最大长度
+    if len(heading_content) > max_heading_len:
+        heading_content = heading_content[:max_heading_len]
+
+    end_pos = content_start + len(heading_content)
+    heading_text = text[start:start + prefix_len] + heading_content
+
+    return heading_text.strip(), end_pos
+
+
+def split_long_paragraph(text: str) -> list:
+    """
+    把大段文字按章节标题切分成多个块。
+    返回 [(type, content), ...]，type 为 'heading' 或 'paragraph'
+    """
+    parts = []
+    last_end = 0
+
+    # 收集所有标题位置
+    headings = []
+
+    # 匹配 "一、xxx" 模式
+    for m in SECTION_PREFIX_RE.finditer(text):
+        heading_text, end_pos = extract_heading(text, m.start(), len(m.group(0)))
+        # 验证：标题后面应该跟着正文
+        if end_pos < len(text) - 1 and len(heading_text) > 2:
+            headings.append((m.start(), end_pos, heading_text))
+
+    # 匹配 "第一章 xxx" 模式
+    for m in SECTION_NUM_PREFIX_RE.finditer(text):
+        heading_text, end_pos = extract_heading(text, m.start(), len(m.group(0)))
+        if end_pos < len(text) - 1 and len(heading_text) > 2:
+            headings.append((m.start(), end_pos, heading_text))
+
+    # 匹配 "结语" 等结尾标记
+    for m in CONCLUSION_RE.finditer(text):
+        heading_text = m.group(0).strip()
+        headings.append((m.start(), m.end(), heading_text))
+
+    # 按位置排序
+    headings.sort(key=lambda x: x[0])
+
+    # 去重：移除重叠的标题（保留前面的）
+    filtered = []
+    for h in headings:
+        if not filtered or h[0] >= filtered[-1][1]:
+            filtered.append(h)
+    headings = filtered
+
+    # 切分
+    for start, end, heading_text in headings:
+        # 标题前的内容 → 普通段落
+        if start > last_end:
+            prev_text = text[last_end:start].strip()
+            if prev_text:
+                parts.append(("paragraph", prev_text))
+        # 标题本身
+        parts.append(("heading", heading_text))
+        last_end = end
+
+    # 剩余内容
+    if last_end < len(text):
+        remaining = text[last_end:].strip()
+        if remaining:
+            parts.append(("paragraph", remaining))
+
+    # 如果没有切分出任何标题，返回整段
+    if not parts:
+        parts.append(("paragraph", text))
+
+    return parts
+
+
 def smart_preprocess(raw_text: str) -> str:
     """
     智能预处理：把纯文本 / 半结构化文本转成结构化 Markdown。
 
     处理规则：
-    1. "标题：xxx" / "标题:xxx" → 如果是语义标签，转成引用块；否则按标题处理
-    2. "一、xxx" / "第一章 xxx" → 二级标题
-    3. 短行可能是标题 → 自动提升
-    4. 连续短行用顿号/逗号连接 → 可能是列表
-    5. 第一行自动作为文章标题
+    1. 大段无换行文字 → 按章节标题智能切分
+    2. "标题：xxx" / "标题:xxx" → 主标题
+    3. "一、xxx" / "第一章 xxx" → 二级标题
+    4. 语义标签（感悟/实践/原文等）→ 引用块（卡片）
+    5. 短行可能是标题 → 自动提升
+    6. 第一行自动作为文章标题
     """
     lines = raw_text.strip().split("\n")
     result = []
@@ -263,7 +460,19 @@ def smart_preprocess(raw_text: str) -> str:
             i += 1
             continue
 
-        # ── 规则2：匹配 "标题：内容" 或 "标签：内容" ──
+        # ── 规则2：超长单行（>200字且无换行）→ 段落内智能分块 ──
+        if len(line) > 200 and "\n" not in line:
+            chunks = split_long_paragraph(line)
+            for chunk_type, chunk_text in chunks:
+                if chunk_type == "heading":
+                    result.append(f"## {chunk_text}")
+                else:
+                    # 对段落内容进一步处理语义标签
+                    result.extend(_process_paragraph(chunk_text))
+            i += 1
+            continue
+
+        # ── 规则3：匹配 "标题：内容" 或 "标签：内容" ──
         label_match = SEMANTIC_LABEL_RE.match(line)
         colon_match = re.match(r'^(.{1,6})[：:]\s*(.+)$', line)
 
@@ -275,7 +484,7 @@ def smart_preprocess(raw_text: str) -> str:
             j = i + 1
             while j < len(lines):
                 next_l = lines[j].strip()
-                if not next_l or SEMANTIC_LABEL_RE.match(next_l) or next.startswith("#") or next.startswith(">"):
+                if not next_l or SEMANTIC_LABEL_RE.match(next_l) or next_l.startswith("#") or next_l.startswith(">"):
                     break
                 block_lines.append(next_l)
                 j += 1
@@ -296,7 +505,7 @@ def smart_preprocess(raw_text: str) -> str:
 
             # 标签是"副标题"/"日期" → 记录但不特别处理
             if label_text in ("副标题", "日期", "时间", "作者"):
-                result.append(line)  # 保留原样，后面会处理
+                result.append(line)
                 i += 1
                 continue
 
@@ -314,28 +523,25 @@ def smart_preprocess(raw_text: str) -> str:
                 i = j
                 continue
 
-            # 其他"xxx：yyy" → 原样输出（可能是"地址：xxx"等普通内容）
+            # 其他"xxx：yyy" → 原样输出
             result.append(line)
             i += 1
             continue
 
-        # ── 规则3a：有序列表行 "1. xxx" / "1、xxx" → 不转标题，保持原样 ──
-        # 注意：只处理单数字开头（1-9），避免误伤大段列表
+        # ── 规则4a：有序列表行 "1. xxx" / "1、xxx" → 不转标题 ──
         if re.match(r'^[1-9][、．.．\)]\s*', line) and len(line) < 60:
             result.append(line)
             i += 1
             continue
 
-        # ── 规则3b：章节标题模式 "一、xxx" / "第一章 xxx" ──
+        # ── 规则4b：章节标题模式 "一、xxx" / "第一章 xxx" ──
         section_match = SECTION_TITLE_RE.match(line)
         if section_match:
-            section_title = section_match.group(1) if section_match.lastindex else line
-            # 提取完整的标题文本
             result.append(f"## {line}")
             i += 1
             continue
 
-        # ── 规则4：短行可能是标题 ──
+        # ── 规则5：短行可能是标题 ──
         prev_line = lines[i - 1] if i > 0 else ""
         next_line = lines[i + 1] if i + 1 < len(lines) else ""
         if is_short_heading(line, prev_line, next_line):
@@ -343,18 +549,81 @@ def smart_preprocess(raw_text: str) -> str:
             i += 1
             continue
 
-        # ── 规则5：普通段落 ──
-        result.append(line)
+        # ── 规则6：普通段落，检查是否包含内联语义标签 ──
+        result.extend(_process_paragraph(line))
         i += 1
 
     # 如果没有找到标题，把第一行非空内容作为标题
     if not title_found:
         for idx, r in enumerate(result):
             if r.strip() and not r.startswith("#") and not r.startswith(">"):
-                result[idx] = f"# {r}"
+                # 如果段落过长，提取短标题并保留完整段落作为引言
+                if len(r) > 40:
+                    # 尝试在第一个句号/逗号处截取
+                    for punct_pos, ch in enumerate(r):
+                        if ch in '。！？' and punct_pos > 4:
+                            short_title = r[:punct_pos]
+                            result[idx] = f"# {short_title}"
+                            # 在标题后插入完整段落作为引言
+                            result.insert(idx + 1, f"> {r}")
+                            break
+                    else:
+                        # 没有找到合适截断点，取前15字
+                        result[idx] = f"# {r[:15]}…"
+                        result.insert(idx + 1, r)
+                else:
+                    result[idx] = f"# {r}"
                 break
 
     return "\n".join(result)
+
+
+def _process_paragraph(text: str) -> list:
+    """
+    处理段落内容：检测内联语义标签（感悟/实践/原文等），转成引用块。
+    返回行列表。
+    """
+    result = []
+    # 检测段落中是否包含语义标签模式（如"感悟：xxx"）
+    # 策略：找所有语义标签位置，切分段落
+    last_end = 0
+    found_label = False
+
+    for m in SEMANTIC_LABEL_RE.finditer(text):
+        # 标签前的内容 → 普通段落
+        if m.start() > last_end:
+            prev = text[last_end:m.start()].strip()
+            if prev:
+                result.append(prev)
+
+        # 提取标签和后续内容
+        label = m.group(1)
+        rest = text[m.end():].strip()
+
+        # 找到下一个标签或段落结束的位置
+        next_label_pos = len(text)
+        for nm in SEMANTIC_LABEL_RE.finditer(text, m.end()):
+            next_label_pos = nm.start()
+            break
+
+        content = text[m.end():next_label_pos].strip()
+        if content:
+            result.append(f"> {label}：{content}")
+            found_label = True
+
+        last_end = next_label_pos
+
+    # 剩余内容
+    if last_end < len(text):
+        remaining = text[last_end:].strip()
+        if remaining:
+            result.append(remaining)
+
+    # 如果没有发现任何语义标签，返回整段
+    if not found_label and not result:
+        result.append(text)
+
+    return result
 
 
 # ── Markdown → HTML 渲染 ──
