@@ -25,10 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 路径配置
-SKILLS_DIR = Path.home() / ".workbuddy/skills"
-TYPESET_SCRIPT = SKILLS_DIR / "wechat-article-typeset/html-to-wechat-copy.js"
-TEMPLATES_DIR = SKILLS_DIR / "wechat-typeset-pro/templates"
+# 路径配置（项目内相对路径，不依赖外部 ~/.workbuddy）
+PROJECT_DIR = Path(__file__).parent.resolve()
+TEMPLATES_DIR = PROJECT_DIR / "templates"
+TYPESET_SCRIPT = PROJECT_DIR / "html-to-wechat-copy.js"
 
 STYLE_MAP = {
     "zen":     TEMPLATES_DIR / "zen-classic.html",
@@ -97,6 +97,11 @@ def call_shiker_api(html_content: str) -> str:
     调用 edit.shiker.tech API 获取预览链接。
     直接写临时文件 → node html-to-wechat-copy.js → 解析输出 URL。
     """
+    # 检查脚本是否存在（服务器上可能没有 Node 环境或脚本）
+    if not TYPESET_SCRIPT.exists():
+        # 降级：直接返回 HTML 内容（用户可手动复制到 edit.shiker.tech）
+        return f"data:text/html;base64,{html_content.encode('utf-8').hex()}"
+
     with tempfile.NamedTemporaryFile(suffix=".html", mode="w", encoding="utf-8", delete=False) as f:
         f.write(html_content)
         tmp_path = f.name
