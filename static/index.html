@@ -54,16 +54,17 @@
           <textarea
             id="markdown-input"
             class="w-full h-72 text-sm text-gray-700 border border-gray-200 rounded-xl p-4 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder-gray-300"
-            placeholder="在此粘贴 Markdown 或纯文本...
+            placeholder="在此粘贴文案，支持纯文字或 Markdown...
 
-# 文章标题
-## 一、章节标题
-正文内容...
+直接写就行，系统会自动识别：
+- 第一行 → 文章标题
+- 感悟/心得 → 绿色卡片
+- 实践/案例 → 橙色卡片
+- 原文/经典 → 米色卡片
+- 注意/建议 → 金边卡片
+- 一、二、三 → 章节标题
 
-> 引用内容（不超过300字）
-
-- 要点一
-- 要点二"></textarea>
+也可以用 Markdown 格式：## 标题、> 引用、- 列表"></textarea>
 
           <!-- 示例按钮 -->
           <div class="mt-3 flex gap-2 flex-wrap">
@@ -193,7 +194,7 @@
 
     <!-- 底部说明 -->
     <div class="mt-6 text-center">
-      <p class="text-xs text-gray-400">支持 Markdown 格式 · 三种专业排版风格 · 一键复制到公众号</p>
+      <p class="text-xs text-gray-400">支持纯文字 / 半结构化 / Markdown · 智能识别语义 · 一键复制到公众号</p>
     </div>
   </main>
 
