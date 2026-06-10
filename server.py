@@ -167,6 +167,196 @@ def call_shiker_api(html_content: str) -> str:
         raise ValueError(f"API 返回 HTTP {e.code}：{body}")
 
 
+# ── 智能文本预处理：纯文本 → 结构化 Markdown ──
+
+# 语义标签 → 对应卡片类型的映射
+SEMANTIC_LABELS = {
+    # 感悟类
+    "感悟": "insight", "心得": "insight", "体会": "insight", "思考": "insight",
+    "领悟": "insight", "启发": "insight", "感想": "insight", "反思": "insight",
+    # 实践类
+    "实践": "practice", "案例": "practice", "应用": "practice", "操作": "practice",
+    "步骤": "practice", "方法": "practice", "练习": "practice", "体验": "practice",
+    "行动": "practice", "怎么做": "practice", "如何做": "practice",
+    # 原文/引用类
+    "原文": "quote", "经文": "quote", "经典": "quote", "引用": "quote",
+    "子曰": "quote", "道德经": "quote", "论语": "quote", "金刚": "quote",
+    "原典": "quote", "古文": "quote",
+    # 总结类
+    "总结": "summary", "小结": "summary", "结语": "summary", "寄语": "summary",
+    "总而言之": "summary", "归纳": "summary", "概要": "summary",
+    # 提示类
+    "提示": "tip", "注意": "tip", "提醒": "tip", "建议": "tip",
+    "补充": "tip", "说明": "tip", "备注": "tip", "注意": "tip",
+    "小贴士": "tip", "温馨": "tip",
+    # 引言类
+    "引言": "intro", "前言": "intro", "导语": "intro", "开篇": "intro",
+    "写在前面": "intro", "导读": "intro", "背景": "intro",
+}
+
+# 编译语义标签的正则（按长度降序，优先匹配长标签）
+_sorted_labels = sorted(SEMANTIC_LABELS.keys(), key=len, reverse=True)
+SEMANTIC_LABEL_RE = re.compile(
+    r'^(?:【|「|〈|<)?(' + '|'.join(re.escape(k) for k in _sorted_labels) + r')(?:】|」|〉|>)?[\s：:]*',
+    re.IGNORECASE
+)
+
+# 章节标题模式（中文序号）
+SECTION_TITLE_RE = re.compile(
+    r'^(?:'
+    r'[一二三四五六七八九十百]+[、．.．]'   # 一、二、三、
+    r'|第[一二三四五六七八九十百]+[章节篇]'  # 第一章、第二节
+    r')\s*(.+)'
+)
+
+
+def is_short_heading(line: str, prev_line: str, next_line: str) -> bool:
+    """
+    判断一行是否像标题（不是标题语法但语义上是标题）。
+    规则：短行(≤20字) + 前后有空行或紧跟内容行。
+    """
+    stripped = line.strip()
+    if len(stripped) > 20 or len(stripped) < 2:
+        return False
+    # 排除明显是段落的行（含句号且较长）
+    if '。' in stripped and len(stripped) > 10:
+        return False
+    # 排除以标点结尾的行
+    if stripped[-1] in '，,；;：:、':
+        return False
+    # 前面有空行且后面有内容 → 很可能是标题
+    if (not prev_line.strip()) and next_line.strip():
+        return True
+    return False
+
+
+def smart_preprocess(raw_text: str) -> str:
+    """
+    智能预处理：把纯文本 / 半结构化文本转成结构化 Markdown。
+
+    处理规则：
+    1. "标题：xxx" / "标题:xxx" → 如果是语义标签，转成引用块；否则按标题处理
+    2. "一、xxx" / "第一章 xxx" → 二级标题
+    3. 短行可能是标题 → 自动提升
+    4. 连续短行用顿号/逗号连接 → 可能是列表
+    5. 第一行自动作为文章标题
+    """
+    lines = raw_text.strip().split("\n")
+    result = []
+    title_found = False
+    i = 0
+
+    while i < len(lines):
+        line = lines[i].strip()
+
+        # 空行保留
+        if not line:
+            result.append("")
+            i += 1
+            continue
+
+        # ── 规则1：已经是 Markdown 语法的，直接通过 ──
+        if line.startswith("#") or line.startswith("> ") or line.startswith("- ") or line.startswith("* "):
+            if line.startswith("# ") and not title_found:
+                title_found = True
+            result.append(line)
+            i += 1
+            continue
+
+        # ── 规则2：匹配 "标题：内容" 或 "标签：内容" ──
+        label_match = SEMANTIC_LABEL_RE.match(line)
+        colon_match = re.match(r'^(.{1,6})[：:]\s*(.+)$', line)
+
+        if label_match:
+            # 语义标签开头 → 转成引用块（会触发卡片渲染）
+            content_after_label = SEMANTIC_LABEL_RE.sub('', line, count=1).strip()
+            # 检查后续行是否是同一标签的续行
+            block_lines = [content_after_label]
+            j = i + 1
+            while j < len(lines):
+                next_l = lines[j].strip()
+                if not next_l or SEMANTIC_LABEL_RE.match(next_l) or next.startswith("#") or next.startswith(">"):
+                    break
+                block_lines.append(next_l)
+                j += 1
+            result.append("> " + "\n> ".join(block_lines))
+            i = j
+            continue
+
+        if colon_match:
+            label_text = colon_match.group(1)
+            content_text = colon_match.group(2)
+
+            # 标签是"标题"类关键词 → 设为主标题
+            if label_text in ("标题", "题目", "主题") and not title_found:
+                result.append(f"# {content_text}")
+                title_found = True
+                i += 1
+                continue
+
+            # 标签是"副标题"/"日期" → 记录但不特别处理
+            if label_text in ("副标题", "日期", "时间", "作者"):
+                result.append(line)  # 保留原样，后面会处理
+                i += 1
+                continue
+
+            # 其他"xxx：yyy" → 如果label像语义标签，转引用块
+            if label_text in SEMANTIC_LABELS:
+                block_lines = [content_text]
+                j = i + 1
+                while j < len(lines):
+                    next_l = lines[j].strip()
+                    if not next_l or SEMANTIC_LABEL_RE.match(next_l) or next_l.startswith("#") or next_l.startswith(">"):
+                        break
+                    block_lines.append(next_l)
+                    j += 1
+                result.append(f"> {label_text}：" + "\n> ".join(block_lines))
+                i = j
+                continue
+
+            # 其他"xxx：yyy" → 原样输出（可能是"地址：xxx"等普通内容）
+            result.append(line)
+            i += 1
+            continue
+
+        # ── 规则3a：有序列表行 "1. xxx" / "1、xxx" → 不转标题，保持原样 ──
+        # 注意：只处理单数字开头（1-9），避免误伤大段列表
+        if re.match(r'^[1-9][、．.．\)]\s*', line) and len(line) < 60:
+            result.append(line)
+            i += 1
+            continue
+
+        # ── 规则3b：章节标题模式 "一、xxx" / "第一章 xxx" ──
+        section_match = SECTION_TITLE_RE.match(line)
+        if section_match:
+            section_title = section_match.group(1) if section_match.lastindex else line
+            # 提取完整的标题文本
+            result.append(f"## {line}")
+            i += 1
+            continue
+
+        # ── 规则4：短行可能是标题 ──
+        prev_line = lines[i - 1] if i > 0 else ""
+        next_line = lines[i + 1] if i + 1 < len(lines) else ""
+        if is_short_heading(line, prev_line, next_line):
+            result.append(f"## {line}")
+            i += 1
+            continue
+
+        # ── 规则5：普通段落 ──
+        result.append(line)
+        i += 1
+
+    # 如果没有找到标题，把第一行非空内容作为标题
+    if not title_found:
+        for idx, r in enumerate(result):
+            if r.strip() and not r.startswith("#") and not r.startswith(">"):
+                result[idx] = f"# {r}"
+                break
+
+    return "\n".join(result)
+
+
 # ── Markdown → HTML 渲染 ──
 
 def detect_card_type(text: str) -> str:
@@ -190,7 +380,11 @@ def detect_card_type(text: str) -> str:
 def build_html(markdown_text: str, style: str) -> str:
     """
     把用户输入的 Markdown / 纯文本，按照选定风格模板渲染为完整 HTML。
+    支持纯文本、半结构化文本和标准 Markdown。
     """
+    # 智能预处理：纯文本 → 结构化 Markdown
+    markdown_text = smart_preprocess(markdown_text)
+
     template_path = STYLE_MAP[style]
     template_html = template_path.read_text(encoding="utf-8")
     cfg = STYLE_CONFIG[style]
@@ -282,6 +476,13 @@ def build_html(markdown_text: str, style: str) -> str:
         # 支持 **粗体**
         para = line
         para = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', para)
+        # 处理 "标签：内容" 格式，高亮标签部分
+        colon_match = re.match(r'^(.{1,6})([：:])(.+)$', para)
+        if colon_match and len(colon_match.group(1)) <= 6:
+            label = colon_match.group(1)
+            sep = colon_match.group(2)
+            rest = colon_match.group(3)
+            para = f'<strong style="color:{cfg["title_color"]}">{label}</strong>{sep}{rest}'
         content_parts.append(
             f'<p style="font-size:{cfg["font_size"]};color:{cfg["text_color"]};'
             f'line-height:{cfg["line_height"]};margin:0 0 12px;">{para}</p>'
