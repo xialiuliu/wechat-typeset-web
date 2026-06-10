@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>公众号排版工具 — 三秒出效果</title>
+  <title>公众号排版工具 — AI 写作 + 三秒排版</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <style>
     body { background: #f5f2ed; }
@@ -22,6 +22,15 @@
     .copy-success { color: #3B6D11; }
     #result-section { transition: all 0.3s ease; }
     .style-preview { font-size: 11px; opacity: 0.7; margin-top: 4px; }
+    .mode-tab { cursor: pointer; padding: 8px 16px; font-size: 13px; font-weight: 500;
+      border-bottom: 2px solid transparent; color: #888; transition: all 0.2s; }
+    .mode-tab.active { color: #5c4a2a; border-bottom-color: #c8a96e; }
+    .mode-tab:hover { color: #5c4a2a; }
+    .topic-chip { display: inline-block; padding: 4px 12px; border-radius: 16px; font-size: 12px;
+      cursor: pointer; transition: all 0.2s; border: 1px solid #e0d5c0; color: #8a7560; background: #faf6f0; }
+    .topic-chip:hover { background: #c8a96e; color: #fff; border-color: #c8a96e; }
+    .ai-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+      border-radius: 10px; font-size: 10px; font-weight: 600; background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -33,8 +42,11 @@
         <span class="text-white text-sm font-medium">排</span>
       </div>
       <div>
-        <h1 class="text-base font-medium text-gray-800">公众号排版工具</h1>
-        <p class="text-xs text-gray-400">粘贴文案 · 选择风格 · 一键生成</p>
+        <h1 class="text-base font-medium text-gray-800 flex items-center gap-2">
+          公众号排版工具
+          <span class="ai-badge">AI</span>
+        </h1>
+        <p class="text-xs text-gray-400">AI 写作 · 智能排版 · 一键生成</p>
       </div>
     </div>
     <div class="text-xs text-gray-400 hidden sm:block">支持禅意古朴 / 极简现代 / 科技商务</div>
@@ -45,16 +57,29 @@
 
       <!-- 左侧：输入区 -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 class="text-sm font-medium text-gray-700">输入文案</h2>
-          <button onclick="clearInput()" class="text-xs text-gray-400 hover:text-gray-600 transition">清空</button>
+
+        <!-- 模式切换 -->
+        <div class="flex border-b border-gray-100">
+          <div id="mode-typeset" class="mode-tab active flex-1 text-center" onclick="switchMode('typeset')">
+            直接排版
+          </div>
+          <div id="mode-ai" class="mode-tab flex-1 text-center" onclick="switchMode('ai')">
+            AI 写作排版
+          </div>
         </div>
 
-        <div class="p-5">
-          <textarea
-            id="markdown-input"
-            class="w-full h-72 text-sm text-gray-700 border border-gray-200 rounded-xl p-4 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder-gray-300"
-            placeholder="在此粘贴文案，支持纯文字或 Markdown...
+        <!-- 直接排版模式 -->
+        <div id="typeset-panel">
+          <div class="px-5 py-3 border-b border-gray-50 flex items-center justify-between">
+            <h2 class="text-sm font-medium text-gray-700">输入文案</h2>
+            <button onclick="clearInput()" class="text-xs text-gray-400 hover:text-gray-600 transition">清空</button>
+          </div>
+
+          <div class="p-5">
+            <textarea
+              id="markdown-input"
+              class="w-full h-64 text-sm text-gray-700 border border-gray-200 rounded-xl p-4 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder-gray-300"
+              placeholder="在此粘贴文案，支持纯文字或 Markdown...
 
 直接写就行，系统会自动识别：
 - 第一行 → 文章标题
@@ -66,16 +91,60 @@
 
 也可以用 Markdown 格式：## 标题、> 引用、- 列表"></textarea>
 
-          <!-- 示例按钮 -->
-          <div class="mt-3 flex gap-2 flex-wrap">
-            <span class="text-xs text-gray-400">快速填入示例：</span>
-            <button onclick="fillExample('zen')" class="text-xs text-amber-600 hover:text-amber-800 underline decoration-dotted">道德经感悟</button>
-            <button onclick="fillExample('tech')" class="text-xs text-blue-600 hover:text-blue-800 underline decoration-dotted">技术分享</button>
-            <button onclick="fillExample('minimal')" class="text-xs text-gray-600 hover:text-gray-800 underline decoration-dotted">生活随笔</button>
+            <!-- 示例按钮 -->
+            <div class="mt-3 flex gap-2 flex-wrap">
+              <span class="text-xs text-gray-400">快速填入：</span>
+              <button onclick="fillExample('zen')" class="text-xs text-amber-600 hover:text-amber-800 underline decoration-dotted">道德经感悟</button>
+              <button onclick="fillExample('tech')" class="text-xs text-blue-600 hover:text-blue-800 underline decoration-dotted">技术分享</button>
+              <button onclick="fillExample('minimal')" class="text-xs text-gray-600 hover:text-gray-800 underline decoration-dotted">生活随笔</button>
+            </div>
           </div>
         </div>
 
-        <!-- 风格选择 -->
+        <!-- AI 写作模式 -->
+        <div id="ai-panel" class="hidden">
+          <div class="px-5 py-3 border-b border-gray-50">
+            <h2 class="text-sm font-medium text-gray-700">告诉 AI 你想写什么</h2>
+          </div>
+
+          <div class="p-5 space-y-4">
+            <!-- 话题输入 -->
+            <div>
+              <label class="text-xs text-gray-500 mb-1 block">写作指令</label>
+              <input
+                id="ai-prompt"
+                type="text"
+                class="w-full text-sm text-gray-700 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder-gray-300"
+                placeholder="例如：写一篇关于修行觉知的文章"
+              />
+            </div>
+
+            <!-- 快速话题 -->
+            <div>
+              <label class="text-xs text-gray-500 mb-2 block">热门话题</label>
+              <div class="flex flex-wrap gap-2">
+                <span class="topic-chip" onclick="setPrompt('写一篇关于修行觉知的文章')">修行觉知</span>
+                <span class="topic-chip" onclick="setPrompt('写一篇关于正念冥想入门的指南')">正念冥想</span>
+                <span class="topic-chip" onclick="setPrompt('写一篇关于极简生活的思考')">极简生活</span>
+                <span class="topic-chip" onclick="setPrompt('写一篇关于AI时代个人成长的思考')">AI与成长</span>
+                <span class="topic-chip" onclick="setPrompt('写一篇关于中年人健康管理的建议')">健康管理</span>
+                <span class="topic-chip" onclick="setPrompt('写一篇关于亲子沟通的心得')">亲子沟通</span>
+              </div>
+            </div>
+
+            <!-- 参考资料（可选） -->
+            <div>
+              <label class="text-xs text-gray-500 mb-1 block">参考资料（可选）</label>
+              <textarea
+                id="ai-reference"
+                class="w-full h-24 text-sm text-gray-700 border border-gray-200 rounded-xl p-4 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder-gray-300"
+                placeholder="粘贴原文或素材，AI 会基于此来写文章..."
+              ></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- 风格选择（两个模式共用） -->
         <div class="px-5 pb-4">
           <p class="text-xs text-gray-500 mb-3 font-medium">选择排版风格</p>
           <div class="grid grid-cols-3 gap-3">
@@ -133,6 +202,7 @@
             <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
           </div>
           <p class="text-gray-500 text-sm" id="loading-text">正在生成排版...</p>
+          <p class="text-gray-400 text-xs mt-2" id="loading-sub"></p>
         </div>
 
         <!-- 结果 -->
@@ -142,6 +212,7 @@
               <div class="w-2 h-2 rounded-full bg-green-400"></div>
               <h2 class="text-sm font-medium text-gray-700">排版完成</h2>
               <span id="style-badge" class="text-xs px-2 py-0.5 rounded-full" style="background:#f5f0e8;color:#5c4a2a">禅意古朴</span>
+              <span id="ai-badge-result" class="ai-badge hidden">AI 写作</span>
             </div>
             <button onclick="reset()" class="text-xs text-gray-400 hover:text-gray-600 transition">重新排版</button>
           </div>
@@ -153,6 +224,18 @@
               <a id="preview-link" href="#" target="_blank" class="text-sm text-amber-700 font-medium hover:underline break-all" style="word-break:break-all">
                 https://edit.shiker.tech/copy.html?id=...
               </a>
+            </div>
+
+            <!-- AI 生成的文章内容（可编辑后重新排版） -->
+            <div id="ai-article-section" class="hidden mb-4">
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500">AI 生成的文章（可编辑后重新排版）</p>
+                <button onclick="retypesetArticle()" class="text-xs text-amber-600 hover:text-amber-800 underline">编辑后重新排版</button>
+              </div>
+              <textarea
+                id="ai-article-content"
+                class="w-full h-32 text-xs text-gray-600 border border-gray-200 rounded-lg p-3 focus:outline-none focus:border-amber-400 font-mono"
+              ></textarea>
             </div>
 
             <!-- 操作按钮 -->
@@ -173,7 +256,7 @@
             <!-- 使用提示 -->
             <div class="mt-4 p-3 bg-gray-50 rounded-xl">
               <p class="text-xs text-gray-500 leading-relaxed">
-                💡 打开预览页面后，点击页面上的「复制到微信」按钮，再粘贴到公众号编辑器即可。
+                打开预览页面后，点击页面上的「复制到微信」按钮，再粘贴到公众号编辑器即可。
               </p>
             </div>
           </div>
@@ -194,12 +277,13 @@
 
     <!-- 底部说明 -->
     <div class="mt-6 text-center">
-      <p class="text-xs text-gray-400">支持纯文字 / 半结构化 / Markdown · 智能识别语义 · 一键复制到公众号</p>
+      <p class="text-xs text-gray-400">支持 AI 写作 / 纯文字 / Markdown · 智能识别语义 · 一键复制到公众号</p>
     </div>
   </main>
 
   <script>
     let currentStyle = 'zen';
+    let currentMode = 'typeset';  // 'typeset' | 'ai'
     const API_BASE = window.location.origin;
 
     const EXAMPLES = {
@@ -267,6 +351,29 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
 慢下来，不是退步，是找回被速度带走的那部分自己。`
     };
 
+    // ── 模式切换 ──
+    function switchMode(mode) {
+      currentMode = mode;
+      document.getElementById('mode-typeset').classList.toggle('active', mode === 'typeset');
+      document.getElementById('mode-ai').classList.toggle('active', mode === 'ai');
+      document.getElementById('typeset-panel').classList.toggle('hidden', mode !== 'typeset');
+      document.getElementById('ai-panel').classList.toggle('hidden', mode !== 'ai');
+
+      // 更新按钮文字
+      const btn = document.getElementById('generate-btn');
+      if (mode === 'ai') {
+        btn.textContent = 'AI 生成 + 排版';
+      } else {
+        btn.textContent = '生成排版预览';
+      }
+    }
+
+    function setPrompt(text) {
+      document.getElementById('ai-prompt').value = text;
+      document.getElementById('ai-prompt').focus();
+    }
+
+    // ── 风格选择 ──
     function selectStyle(style) {
       currentStyle = style;
       ['zen','minimal','tech'].forEach(s => {
@@ -274,7 +381,6 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       });
       document.getElementById('btn-' + style).classList.add('active');
 
-      // 同步生成按钮颜色
       const btn = document.getElementById('generate-btn');
       const gradients = {
         zen: 'linear-gradient(135deg, #c8a96e 0%, #a07840 100%)',
@@ -290,6 +396,7 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
     }
 
     function fillExample(style) {
+      switchMode('typeset');
       selectStyle(style);
       document.getElementById('markdown-input').value = EXAMPLES[style];
     }
@@ -305,16 +412,25 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       showState('empty');
     }
 
+    // ── 生成 ──
     async function generate() {
+      if (currentMode === 'ai') {
+        return generateAI();
+      }
+      return generateTypeset();
+    }
+
+    async function generateTypeset() {
       const markdown = document.getElementById('markdown-input').value.trim();
       if (!markdown) {
         document.getElementById('markdown-input').focus();
-        document.getElementById('markdown-input').placeholder = '⚠ 请先输入文案内容...';
+        document.getElementById('markdown-input').placeholder = '请先输入文案内容...';
         return;
       }
 
       showState('loading');
       document.getElementById('loading-text').textContent = '正在生成' + getStyleLabel() + '排版...';
+      document.getElementById('loading-sub').textContent = '';
 
       try {
         const res = await fetch(API_BASE + '/api/typeset', {
@@ -329,31 +445,116 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
         }
 
         const data = await res.json();
-        showState('success');
+        showResult(data);
+      } catch (e) {
+        showState('error');
+        document.getElementById('error-msg').textContent = e.message;
+      }
+    }
 
+    async function generateAI() {
+      const prompt = document.getElementById('ai-prompt').value.trim();
+      if (!prompt) {
+        document.getElementById('ai-prompt').focus();
+        document.getElementById('ai-prompt').placeholder = '请输入写作指令或话题...';
+        return;
+      }
+
+      showState('loading');
+      document.getElementById('loading-text').textContent = 'AI 正在写文章...';
+      document.getElementById('loading-sub').textContent = '大约需要 10-20 秒';
+
+      try {
+        const reference = document.getElementById('ai-reference').value.trim();
+        const body = { prompt, style: currentStyle };
+        if (reference) body.reference = reference;
+
+        const res = await fetch(API_BASE + '/api/ai-write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || '服务异常');
+        }
+
+        const data = await res.json();
+
+        // 显示 AI 生成的文章内容
+        document.getElementById('ai-article-section').classList.remove('hidden');
+        document.getElementById('ai-article-content').value = data.article;
+        document.getElementById('ai-badge-result').classList.remove('hidden');
+
+        showResult(data);
+      } catch (e) {
+        showState('error');
+        document.getElementById('error-msg').textContent = e.message;
+      }
+    }
+
+    function showResult(data) {
+      showState('success');
+
+      document.getElementById('preview-link').textContent = data.preview_url;
+      document.getElementById('preview-link').href = data.preview_url;
+      document.getElementById('open-btn').href = data.preview_url;
+
+      const badge = document.getElementById('style-badge');
+      badge.textContent = data.style_label;
+      const badgeColors = {
+        zen: { bg: '#f5f0e8', color: '#5c4a2a' },
+        minimal: { bg: '#e6f1fb', color: '#185fa5' },
+        tech: { bg: '#eef0f5', color: '#1a2d4a' },
+      };
+      const bc = badgeColors[data.style] || badgeColors.zen;
+      badge.style.background = bc.bg;
+      badge.style.color = bc.color;
+
+      const gradients = {
+        zen: 'linear-gradient(135deg, #c8a96e 0%, #a07840 100%)',
+        minimal: 'linear-gradient(135deg, #378add 0%, #185fa5 100%)',
+        tech: 'linear-gradient(135deg, #1a2d4a 0%, #0c1e33 100%)',
+      };
+      document.getElementById('open-btn').style.background = gradients[data.style] || gradients.zen;
+
+      // 非AI模式隐藏文章编辑区
+      if (currentMode !== 'ai') {
+        document.getElementById('ai-article-section').classList.add('hidden');
+        document.getElementById('ai-badge-result').classList.add('hidden');
+      }
+    }
+
+    // 编辑 AI 文章后重新排版
+    async function retypesetArticle() {
+      const article = document.getElementById('ai-article-content').value.trim();
+      if (!article) return;
+
+      showState('loading');
+      document.getElementById('loading-text').textContent = '正在重新排版...';
+      document.getElementById('loading-sub').textContent = '';
+
+      try {
+        const res = await fetch(API_BASE + '/api/typeset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown: article, style: currentStyle })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || '服务异常');
+        }
+
+        const data = await res.json();
         document.getElementById('preview-link').textContent = data.preview_url;
         document.getElementById('preview-link').href = data.preview_url;
         document.getElementById('open-btn').href = data.preview_url;
 
-        const badge = document.getElementById('style-badge');
-        badge.textContent = data.style_label;
-        const badgeColors = {
-          zen: { bg: '#f5f0e8', color: '#5c4a2a' },
-          minimal: { bg: '#e6f1fb', color: '#185fa5' },
-          tech: { bg: '#eef0f5', color: '#1a2d4a' },
-        };
-        const bc = badgeColors[data.style] || badgeColors.zen;
-        badge.style.background = bc.bg;
-        badge.style.color = bc.color;
-
-        // 同步 open 按钮颜色
-        const gradients = {
-          zen: 'linear-gradient(135deg, #c8a96e 0%, #a07840 100%)',
-          minimal: 'linear-gradient(135deg, #378add 0%, #185fa5 100%)',
-          tech: 'linear-gradient(135deg, #1a2d4a 0%, #0c1e33 100%)',
-        };
-        document.getElementById('open-btn').style.background = gradients[data.style] || gradients.zen;
-
+        showState('success');
+        document.getElementById('ai-article-section').classList.remove('hidden');
+        document.getElementById('ai-badge-result').classList.remove('hidden');
       } catch (e) {
         showState('error');
         document.getElementById('error-msg').textContent = e.message;

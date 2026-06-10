@@ -6,6 +6,7 @@
 
 import re
 import json
+import os
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -787,6 +788,115 @@ def build_html(markdown_text: str, style: str) -> str:
     return template_html
 
 
+# ── DeepSeek AI 配置 ──
+
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1/chat/completions"
+
+# 从 .env 文件加载 API Key（服务器部署时使用）
+_env_path = PROJECT_DIR / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().strip().split("\n"):
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, val = line.partition("=")
+            key, val = key.strip(), val.strip().strip('"').strip("'")
+            if key == "DEEPSEEK_API_KEY" and not DEEPSEEK_API_KEY:
+                DEEPSEEK_API_KEY = val
+
+# AI 写作系统提示词
+AI_SYSTEM_PROMPT = """你是一位资深公众号写手，擅长将话题写成有深度、有温度的文章。
+
+请按以下规则输出：
+
+1. 第一行必须是文章标题，用 # 标题 格式
+2. 用中文序号划分章节：## 一、xxx、## 二、xxx、## 三、xxx ...
+3. 每个章节下面有 2-3 段正文
+4. 适当使用语义标签来突出重点内容：
+   - 感悟：xxx （会渲染为绿色卡片，适合心得体会）
+   - 实践：xxx （会渲染为橙色卡片，适合可操作的建议）
+   - 原文：xxx （会渲染为米色卡片，适合引用经典原文）
+   - 注意：xxx （会渲染为金边卡片，适合提醒要点）
+5. 每个语义标签独占一行，不要和其他内容混在一行
+6. 语言真诚自然，不要有AI味，避免使用"让我们""总的来说""值得注意的是"等套话
+7. 文章结尾要有结语章节
+8. 总字数控制在 800-1500 字
+
+输出示例格式：
+# 文章标题
+
+引言段落...
+
+## 一、第一个章节
+
+正文内容...
+
+感悟：这里是感悟内容，会显示为绿色卡片
+
+更多正文...
+
+实践：这里是可以操作的建议，会显示为橙色卡片
+
+## 二、第二个章节
+...
+
+## 结语
+
+总结段落..."""
+
+
+def call_deepseek_api(user_prompt: str, article_style: str = "") -> str:
+    """
+    调用 DeepSeek API 生成文章内容。
+    返回生成的 Markdown 文本。
+    """
+    if not DEEPSEEK_API_KEY:
+        raise ValueError("DeepSeek API Key 未配置，请在 .env 文件中设置 DEEPSEEK_API_KEY")
+
+    # 根据排版风格调整写作提示
+    style_hints = {
+        "zen": "文章风格：禅意、古朴、沉稳，适合修行/哲学/传统文化主题",
+        "minimal": "文章风格：简洁、留白、清爽，适合生活随笔/个人成长主题",
+        "tech": "文章风格：理性、数据驱动、专业，适合技术/商业/职场主题",
+    }
+    style_hint = style_hints.get(article_style, "")
+
+    messages = [
+        {"role": "system", "content": AI_SYSTEM_PROMPT},
+        {"role": "user", "content": f"{style_hint}\n\n{user_prompt}" if style_hint else user_prompt},
+    ]
+
+    payload = json.dumps({
+        "model": "deepseek-chat",
+        "messages": messages,
+        "temperature": 0.8,
+        "max_tokens": 3000,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        DEEPSEEK_BASE_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"]
+            return content.strip()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:300]
+        raise ValueError(f"DeepSeek API 返回 HTTP {e.code}：{body}")
+    except urllib.error.URLError as e:
+        raise ValueError(f"DeepSeek API 网络请求失败：{e.reason}")
+    except KeyError:
+        raise ValueError(f"DeepSeek API 返回格式异常：{json.dumps(data, ensure_ascii=False)[:300]}")
+
+
 # ── API 接口 ──
 
 class TypesetRequest(BaseModel):
@@ -817,6 +927,53 @@ async def typeset(req: TypesetRequest):
         )
     except Exception as e:
         raise HTTPException(500, f"排版失败：{str(e)}")
+
+
+# ── AI 写作 + 排版 ──
+
+class AiWriteRequest(BaseModel):
+    prompt: str           # 用户指令/话题
+    style: str = "zen"    # 排版风格
+    reference: str = ""   # 可选：参考资料/素材
+
+
+class AiWriteResponse(BaseModel):
+    preview_url: str
+    style: str
+    style_label: str
+    article: str          # AI 生成的文章内容（Markdown）
+
+
+@app.post("/api/ai-write", response_model=AiWriteResponse)
+async def ai_write(req: AiWriteRequest):
+    if req.style not in STYLE_MAP:
+        raise HTTPException(400, f"style 必须是 zen / minimal / tech，收到：{req.style}")
+    if not req.prompt.strip():
+        raise HTTPException(400, "请输入写作指令或话题")
+
+    try:
+        # 构建用户提示
+        user_prompt = req.prompt.strip()
+        if req.reference.strip():
+            user_prompt += f"\n\n参考资料/素材：\n{req.reference.strip()}"
+
+        # 调用 DeepSeek 生成文章
+        article = call_deepseek_api(user_prompt, req.style)
+
+        # 排版
+        html = build_html(article, req.style)
+        url = call_shiker_api(html)
+
+        return AiWriteResponse(
+            preview_url=url,
+            style=req.style,
+            style_label=STYLE_LABELS[req.style],
+            article=article,
+        )
+    except ValueError as e:
+        raise HTTPException(500, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"AI 写作失败：{str(e)}")
 
 
 @app.get("/api/health")
