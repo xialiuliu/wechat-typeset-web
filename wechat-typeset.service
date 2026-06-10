@@ -1,0 +1,16 @@
+[Unit]
+Description=公众号排版 Web 工具
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/wechat-typeset-web
+Environment=PATH=/opt/wechat-typeset-web/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_OPTIONS=
+ExecStart=/opt/wechat-typeset-web/venv/bin/uvicorn server:app --host 127.0.0.1 --port 8765 --workers 2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

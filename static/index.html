@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>公众号排版工具 — 三秒出效果</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    body { background: #f5f2ed; }
+    .zen-btn { background: #f5f0e8; border: 1.5px solid #c8a96e; color: #5c4a2a; }
+    .zen-btn.active, .zen-btn:hover { background: #c8a96e; color: #fff; border-color: #c8a96e; }
+    .minimal-btn { background: #f8f9fa; border: 1.5px solid #b0b8c4; color: #333; }
+    .minimal-btn.active, .minimal-btn:hover { background: #378add; color: #fff; border-color: #378add; }
+    .tech-btn { background: #f0f4fa; border: 1.5px solid #4a6fa5; color: #1a2d4a; }
+    .tech-btn.active, .tech-btn:hover { background: #1a2d4a; color: #f0a500; border-color: #1a2d4a; }
+    textarea { resize: vertical; }
+    .preview-card { background: linear-gradient(135deg, #fdf8f0 0%, #f5f0e8 100%); }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .loading-dot { animation: pulse-dot 1s infinite; }
+    .loading-dot:nth-child(2) { animation-delay:.2s; }
+    .loading-dot:nth-child(3) { animation-delay:.4s; }
+    .copy-success { color: #3B6D11; }
+    #result-section { transition: all 0.3s ease; }
+    .style-preview { font-size: 11px; opacity: 0.7; margin-top: 4px; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:#c8a96e">
+        <span class="text-white text-sm font-medium">排</span>
+      </div>
+      <div>
+        <h1 class="text-base font-medium text-gray-800">公众号排版工具</h1>
+        <p class="text-xs text-gray-400">粘贴文案 · 选择风格 · 一键生成</p>
+      </div>
+    </div>
+    <div class="text-xs text-gray-400 hidden sm:block">支持禅意古朴 / 极简现代 / 科技商务</div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- 左侧：输入区 -->
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h2 class="text-sm font-medium text-gray-700">输入文案</h2>
+          <button onclick="clearInput()" class="text-xs text-gray-400 hover:text-gray-600 transition">清空</button>
+        </div>
+
+        <div class="p-5">
+          <textarea
+            id="markdown-input"
+            class="w-full h-72 text-sm text-gray-700 border border-gray-200 rounded-xl p-4 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder-gray-300"
+            placeholder="在此粘贴 Markdown 或纯文本...
+
+# 文章标题
+## 一、章节标题
+正文内容...
+
+> 引用内容（不超过300字）
+
+- 要点一
+- 要点二"></textarea>
+
+          <!-- 示例按钮 -->
+          <div class="mt-3 flex gap-2 flex-wrap">
+            <span class="text-xs text-gray-400">快速填入示例：</span>
+            <button onclick="fillExample('zen')" class="text-xs text-amber-600 hover:text-amber-800 underline decoration-dotted">道德经感悟</button>
+            <button onclick="fillExample('tech')" class="text-xs text-blue-600 hover:text-blue-800 underline decoration-dotted">技术分享</button>
+            <button onclick="fillExample('minimal')" class="text-xs text-gray-600 hover:text-gray-800 underline decoration-dotted">生活随笔</button>
+          </div>
+        </div>
+
+        <!-- 风格选择 -->
+        <div class="px-5 pb-4">
+          <p class="text-xs text-gray-500 mb-3 font-medium">选择排版风格</p>
+          <div class="grid grid-cols-3 gap-3">
+
+            <button id="btn-zen" onclick="selectStyle('zen')" class="zen-btn active rounded-xl px-3 py-3 text-sm font-medium transition-all text-center">
+              <div class="text-base mb-1">🪔</div>
+              <div>禅意古朴</div>
+              <div class="style-preview">棕金 · 古纸 · 暖橙</div>
+            </button>
+
+            <button id="btn-minimal" onclick="selectStyle('minimal')" class="minimal-btn rounded-xl px-3 py-3 text-sm font-medium transition-all text-center">
+              <div class="text-base mb-1">◻</div>
+              <div>极简现代</div>
+              <div class="style-preview">黑白 · 留白 · 清冽</div>
+            </button>
+
+            <button id="btn-tech" onclick="selectStyle('tech')" class="tech-btn rounded-xl px-3 py-3 text-sm font-medium transition-all text-center">
+              <div class="text-base mb-1">⬡</div>
+              <div>科技商务</div>
+              <div class="style-preview">深蓝 · 橙红 · 理性</div>
+            </button>
+
+          </div>
+        </div>
+
+        <!-- 生成按钮 -->
+        <div class="px-5 pb-5">
+          <button
+            id="generate-btn"
+            onclick="generate()"
+            class="w-full py-3 rounded-xl text-white font-medium text-sm transition-all shadow-sm hover:shadow-md active:scale-95"
+            style="background: linear-gradient(135deg, #c8a96e 0%, #a07840 100%);">
+            生成排版预览
+          </button>
+        </div>
+      </div>
+
+      <!-- 右侧：结果区 -->
+      <div id="result-section" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+
+        <!-- 空状态 -->
+        <div id="empty-state" class="h-full flex flex-col items-center justify-center p-12 text-center">
+          <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style="background:#f5f0e8">
+            <span class="text-2xl">✦</span>
+          </div>
+          <p class="text-gray-500 text-sm font-medium mb-1">排版结果将显示在这里</p>
+          <p class="text-gray-400 text-xs">输入文案后点击「生成排版预览」</p>
+        </div>
+
+        <!-- 加载中 -->
+        <div id="loading-state" class="hidden h-full flex flex-col items-center justify-center p-12 text-center">
+          <div class="flex gap-2 mb-4">
+            <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
+            <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
+            <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
+          </div>
+          <p class="text-gray-500 text-sm" id="loading-text">正在生成排版...</p>
+        </div>
+
+        <!-- 结果 -->
+        <div id="success-state" class="hidden flex flex-col h-full">
+          <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 rounded-full bg-green-400"></div>
+              <h2 class="text-sm font-medium text-gray-700">排版完成</h2>
+              <span id="style-badge" class="text-xs px-2 py-0.5 rounded-full" style="background:#f5f0e8;color:#5c4a2a">禅意古朴</span>
+            </div>
+            <button onclick="reset()" class="text-xs text-gray-400 hover:text-gray-600 transition">重新排版</button>
+          </div>
+
+          <!-- 预览链接 -->
+          <div class="p-5 flex-1">
+            <div class="preview-card rounded-xl p-4 mb-4">
+              <p class="text-xs text-gray-500 mb-2">预览链接</p>
+              <a id="preview-link" href="#" target="_blank" class="text-sm text-amber-700 font-medium hover:underline break-all" style="word-break:break-all">
+                https://edit.shiker.tech/copy.html?id=...
+              </a>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="flex flex-col gap-3">
+              <a id="open-btn" href="#" target="_blank"
+                class="flex items-center justify-center gap-2 py-3 rounded-xl text-white text-sm font-medium transition hover:opacity-90"
+                style="background: linear-gradient(135deg, #c8a96e 0%, #a07840 100%);">
+                <span>打开预览页面</span>
+                <span class="text-xs opacity-80">→</span>
+              </a>
+
+              <button onclick="copyLink()"
+                class="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
+                <span id="copy-btn-text">复制预览链接</span>
+              </button>
+            </div>
+
+            <!-- 使用提示 -->
+            <div class="mt-4 p-3 bg-gray-50 rounded-xl">
+              <p class="text-xs text-gray-500 leading-relaxed">
+                💡 打开预览页面后，点击页面上的「复制到微信」按钮，再粘贴到公众号编辑器即可。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 错误状态 -->
+        <div id="error-state" class="hidden h-full flex flex-col items-center justify-center p-12 text-center">
+          <div class="w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-red-50">
+            <span class="text-red-400 text-xl">✕</span>
+          </div>
+          <p class="text-gray-700 text-sm font-medium mb-1">生成失败</p>
+          <p id="error-msg" class="text-gray-400 text-xs mb-4">请检查服务是否正常运行</p>
+          <button onclick="generate()" class="text-xs text-amber-600 hover:text-amber-800 underline">重试</button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 底部说明 -->
+    <div class="mt-6 text-center">
+      <p class="text-xs text-gray-400">支持 Markdown 格式 · 三种专业排版风格 · 一键复制到公众号</p>
+    </div>
+  </main>
+
+  <script>
+    let currentStyle = 'zen';
+    const API_BASE = window.location.origin;
+
+    const EXAMPLES = {
+      zen: `# 守静笃，万物并作
+
+## 一、致虚极，守静笃
+
+老子说：「致虚极，守静笃。万物并作，吾以观复。」
+
+> 虚静不是空洞，而是一种容纳的姿态。
+> 心若清明，方能观万物生灭而不迷。
+
+真正的静，不是环境的安静，而是内心的安住。
+
+## 二、归根曰静
+
+- 万物纷纷，各自生长
+- 各复归其根，是为静
+- 归根曰静，是谓复命
+
+当我们放下执取，回归本源，生命自然展开它本来的面目。`,
+
+      tech: `# 2026年AI工作流实践指南
+
+## 一、为什么要构建AI工作流
+
+传统工作模式中，重复性任务消耗大量精力。AI工作流的核心价值是：
+
+> 将人的判断力集中于高价值决策，让机器处理规则性工作。
+
+- 效率提升：重复任务自动化，节省 60% 时间
+- 质量稳定：标准化流程，减少人为失误
+- 规模扩展：1个人的产出 = 传统团队的效能
+
+## 二、三步搭建工作流
+
+**第一步：识别可自动化的任务**
+找出每周重复3次以上的工作，这些都是候选项。
+
+**第二步：选择合适工具**
+WorkBuddy Skill + Automation 覆盖 80% 场景。
+
+**第三步：迭代优化**
+先跑通核心链路，再逐步完善边界情况。`,
+
+      minimal: `# 一个人的清晨
+
+## 六点的光线
+
+清晨六点，窗帘的缝隙透进一道光。
+
+我坐在书桌前，手边一杯茶，书还没翻开。
+就这样坐着，什么都不做，也挺好。
+
+> 不是所有的时间都需要被填满。有些空白，就是生活本来的纹理。
+
+## 关于慢下来
+
+最近在练习：不看手机地吃完一顿饭。
+
+- 第一天很难，注意力总想往外跑
+- 第三天开始，食物的味道变得清晰了
+- 两周后，饭桌变成了一天中最安静的时刻
+
+慢下来，不是退步，是找回被速度带走的那部分自己。`
+    };
+
+    function selectStyle(style) {
+      currentStyle = style;
+      ['zen','minimal','tech'].forEach(s => {
+        document.getElementById('btn-' + s).classList.remove('active');
+      });
+      document.getElementById('btn-' + style).classList.add('active');
+
+      // 同步生成按钮颜色
+      const btn = document.getElementById('generate-btn');
+      const gradients = {
+        zen: 'linear-gradient(135deg, #c8a96e 0%, #a07840 100%)',
+        minimal: 'linear-gradient(135deg, #378add 0%, #185fa5 100%)',
+        tech: 'linear-gradient(135deg, #1a2d4a 0%, #0c1e33 100%)',
+      };
+      btn.style.background = gradients[style];
+    }
+
+    function clearInput() {
+      document.getElementById('markdown-input').value = '';
+      document.getElementById('markdown-input').focus();
+    }
+
+    function fillExample(style) {
+      selectStyle(style);
+      document.getElementById('markdown-input').value = EXAMPLES[style];
+    }
+
+    function showState(name) {
+      ['empty-state','loading-state','success-state','error-state'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', !id.startsWith(name));
+      });
+    }
+
+    function reset() {
+      showState('empty');
+    }
+
+    async function generate() {
+      const markdown = document.getElementById('markdown-input').value.trim();
+      if (!markdown) {
+        document.getElementById('markdown-input').focus();
+        document.getElementById('markdown-input').placeholder = '⚠ 请先输入文案内容...';
+        return;
+      }
+
+      showState('loading');
+      document.getElementById('loading-text').textContent = '正在生成' + getStyleLabel() + '排版...';
+
+      try {
+        const res = await fetch(API_BASE + '/api/typeset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown, style: currentStyle })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || '服务异常');
+        }
+
+        const data = await res.json();
+        showState('success');
+
+        document.getElementById('preview-link').textContent = data.preview_url;
+        document.getElementById('preview-link').href = data.preview_url;
+        document.getElementById('open-btn').href = data.preview_url;
+
+        const badge = document.getElementById('style-badge');
+        badge.textContent = data.style_label;
+        const badgeColors = {
+          zen: { bg: '#f5f0e8', color: '#5c4a2a' },
+          minimal: { bg: '#e6f1fb', color: '#185fa5' },
+          tech: { bg: '#eef0f5', color: '#1a2d4a' },
+        };
+        const bc = badgeColors[data.style] || badgeColors.zen;
+        badge.style.background = bc.bg;
+        badge.style.color = bc.color;
+
+        // 同步 open 按钮颜色
+        const gradients = {
+          zen: 'linear-gradient(135deg, #c8a96e 0%, #a07840 100%)',
+          minimal: 'linear-gradient(135deg, #378add 0%, #185fa5 100%)',
+          tech: 'linear-gradient(135deg, #1a2d4a 0%, #0c1e33 100%)',
+        };
+        document.getElementById('open-btn').style.background = gradients[data.style] || gradients.zen;
+
+      } catch (e) {
+        showState('error');
+        document.getElementById('error-msg').textContent = e.message;
+      }
+    }
+
+    function getStyleLabel() {
+      return { zen:'禅意古朴', minimal:'极简现代', tech:'科技商务' }[currentStyle] || '';
+    }
+
+    async function copyLink() {
+      const link = document.getElementById('preview-link').textContent;
+      try {
+        await navigator.clipboard.writeText(link);
+        const btn = document.getElementById('copy-btn-text');
+        btn.textContent = '已复制！';
+        btn.parentElement.classList.add('copy-success');
+        setTimeout(() => {
+          btn.textContent = '复制预览链接';
+          btn.parentElement.classList.remove('copy-success');
+        }, 2000);
+      } catch {
+        prompt('请手动复制链接：', link);
+      }
+    }
+
+    // Enter 快捷键（Ctrl/Cmd + Enter 生成）
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generate();
+    });
+  </script>
+</body>
+</html>
