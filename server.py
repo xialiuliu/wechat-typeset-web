@@ -7,10 +7,12 @@
 import re
 import json
 import os
+import sqlite3
 import urllib.request
 import urllib.error
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from datetime import datetime, date
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -25,6 +27,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 访问记录中间件（过滤机器人，只记录真实访问）
+@app.middleware("http")
+async def track_visits(request: Request, call_next):
+    # 只记录 GET 页面的访问（API 调用在各自端点内记录）
+    if request.method == "GET" and not request.url.path.startswith("/api/"):
+        ua = request.headers.get("user-agent", "")
+        if not _is_bot(ua):
+            ip = request.client.host if request.client else "-"
+            referer = request.headers.get("referer", "")
+            try:
+                conn = sqlite3.connect(STATS_DB)
+                conn.execute(
+                    "INSERT INTO visits (ts, ip, path, ua, referer) VALUES (?,?,?,?,?)",
+                    (datetime.now().isoformat(), ip, request.url.path, ua[:200], referer[:200]),
+                )
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass  # 统计失败不影响主流程
+    response = await call_next(request)
+    return response
 
 # 路径配置（项目内相对路径，不依赖外部 ~/.workbuddy）
 PROJECT_DIR = Path(__file__).parent.resolve()
@@ -112,6 +136,156 @@ STYLE_CONFIG = {
         "table_border": "#e2e8f0",
     },
 }
+
+
+# ── 访问统计（SQLite，零依赖） ──
+
+STATS_DB = PROJECT_DIR / "stats.db"
+_BOT_KEYWORDS = ["bot", "crawl", "spider", "scan", "zgrab", "curl", "python", "go-http", "visionheight", "palo alto"]
+
+
+def _init_stats_db():
+    """初始化统计数据库"""
+    conn = sqlite3.connect(STATS_DB)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS visits (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts       TEXT    NOT NULL,
+            ip       TEXT    NOT NULL,
+            path     TEXT    NOT NULL,
+            ua       TEXT,
+            referer  TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS api_calls (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts       TEXT    NOT NULL,
+            ip       TEXT    NOT NULL,
+            endpoint TEXT    NOT NULL,
+            style    TEXT,
+            has_ai  INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_visits_ts ON visits(ts)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_api_ts ON api_calls(ts)")
+    conn.commit()
+    conn.close()
+
+
+def _is_bot(ua: str) -> bool:
+    """判断是否为机器人（根据 User-Agent）"""
+    if not ua:
+        return True
+    ua_lower = ua.lower()
+    return any(kw in ua_lower for kw in _BOT_KEYWORDS)
+
+
+def record_visit(request: Request, path: str = "/"):
+    """记录页面访问（过滤机器人）"""
+    ua = request.headers.get("user-agent", "")
+    if _is_bot(ua):
+        return
+    ip = request.client.host if request.client else "-"
+    referer = request.headers.get("referer", "")
+    conn = sqlite3.connect(STATS_DB)
+    conn.execute(
+        "INSERT INTO visits (ts, ip, path, ua, referer) VALUES (?,?,?,?,?)",
+        (datetime.now().isoformat(), ip, path, ua[:200], referer[:200]),
+    )
+    conn.commit()
+    conn.close()
+
+
+def record_api_call(request: Request, endpoint: str, style: str = "", has_ai: bool = False):
+    """记录 API 调用"""
+    ip = request.client.host if request.client else "-"
+    conn = sqlite3.connect(STATS_DB)
+    conn.execute(
+        "INSERT INTO api_calls (ts, ip, endpoint, style, has_ai) VALUES (?,?,?,?,?)",
+        (datetime.now().isoformat(), ip, endpoint, style, 1 if has_ai else 0),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_stats_summary() -> dict:
+    """获取统计数据汇总"""
+    conn = sqlite3.connect(STATS_DB)
+    cur = conn.cursor()
+
+    # 总访问量
+    cur.execute("SELECT COUNT(*) FROM visits")
+    total_visits = cur.fetchone()[0]
+
+    # 今日访问量
+    today = date.today().isoformat()
+    cur.execute("SELECT COUNT(*) FROM visits WHERE ts >= ?", (today,))
+    today_visits = cur.fetchone()[0]
+
+    # 独立访客数（UV）
+    cur.execute("SELECT COUNT(DISTINCT ip) FROM visits")
+    total_uv = cur.fetchone()[0]
+
+    # 今日独立访客
+    cur.execute("SELECT COUNT(DISTINCT ip) FROM visits WHERE ts >= ?", (today,))
+    today_uv = cur.fetchone()[0]
+
+    # API 调用次数
+    cur.execute("SELECT COUNT(*) FROM api_calls")
+    total_api = cur.fetchone()[0]
+
+    # 今日 API 调用
+    cur.execute("SELECT COUNT(*) FROM api_calls WHERE ts >= ?", (today,))
+    today_api = cur.fetchone()[0]
+
+    # 按风格统计
+    cur.execute("""
+        SELECT style, COUNT(*) as cnt
+        FROM api_calls
+        WHERE style != ''
+        GROUP BY style
+        ORDER BY cnt DESC
+    """)
+    style_stats = [{"style": r[0], "count": r[1]} for r in cur.fetchall()]
+
+    # 最近7天访问趋势
+    cur.execute("""
+        SELECT DATE(ts) as day, COUNT(*) as cnt
+        FROM visits
+        WHERE ts >= datetime('now', '-7 days')
+        GROUP BY day
+        ORDER BY day
+    """)
+    daily_trend = [{"date": r[0], "count": r[1]} for r in cur.fetchall()]
+
+    # 访问来源
+    cur.execute("""
+        SELECT referer, COUNT(*) as cnt
+        FROM visits
+        WHERE referer != '' AND referer NOT LIKE '%110.40.186.71%'
+        GROUP BY referer
+        ORDER BY cnt DESC
+        LIMIT 10
+    """)
+    referer_stats = [{"referer": r[0][:80], "count": r[1]} for r in cur.fetchall()]
+
+    conn.close()
+
+    return {
+        "total_visits": total_visits,
+        "today_visits": today_visits,
+        "total_uv": total_uv,
+        "today_uv": today_uv,
+        "total_api_calls": total_api,
+        "today_api_calls": today_api,
+        "style_stats": style_stats,
+        "daily_trend": daily_trend,
+        "referer_stats": referer_stats,
+    }
+
+
+_init_stats_db()
 
 
 def make_card(html: str, card_type: str, style: str) -> str:
@@ -911,7 +1085,7 @@ class TypesetResponse(BaseModel):
 
 
 @app.post("/api/typeset", response_model=TypesetResponse)
-async def typeset(req: TypesetRequest):
+async def typeset(req: TypesetRequest, request: Request):
     if req.style not in STYLE_MAP:
         raise HTTPException(400, f"style 必须是 zen / minimal / tech，收到：{req.style}")
     if not req.markdown.strip():
@@ -920,6 +1094,7 @@ async def typeset(req: TypesetRequest):
     try:
         html = build_html(req.markdown, req.style)
         url = call_shiker_api(html)
+        record_api_call(request, "/api/typeset", style=req.style)
         return TypesetResponse(
             preview_url=url,
             style=req.style,
@@ -945,7 +1120,7 @@ class AiWriteResponse(BaseModel):
 
 
 @app.post("/api/ai-write", response_model=AiWriteResponse)
-async def ai_write(req: AiWriteRequest):
+async def ai_write(req: AiWriteRequest, request: Request):
     if req.style not in STYLE_MAP:
         raise HTTPException(400, f"style 必须是 zen / minimal / tech，收到：{req.style}")
     if not req.prompt.strip():
@@ -964,6 +1139,7 @@ async def ai_write(req: AiWriteRequest):
         html = build_html(article, req.style)
         url = call_shiker_api(html)
 
+        record_api_call(request, "/api/ai-write", style=req.style, has_ai=True)
         return AiWriteResponse(
             preview_url=url,
             style=req.style,
@@ -979,6 +1155,99 @@ async def ai_write(req: AiWriteRequest):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "styles": list(STYLE_LABELS.keys())}
+
+
+@app.get("/api/stats")
+async def stats():
+    """返回访问统计数据（JSON）"""
+    return get_stats_summary()
+
+
+@app.get("/stats", response_class=HTMLResponse)
+async def stats_page():
+    """简单的统计页面"""
+    s = get_stats_summary()
+    today = date.today().isoformat()
+
+    # 构建风格统计表格行
+    style_rows = ""
+    for item in s["style_stats"]:
+        label = STYLE_LABELS.get(item["style"], item["style"])
+        style_rows += f"<tr><td>{label}</td><td>{item['count']}</td></tr>"
+
+    # 构建每日趋势表格行
+    trend_rows = ""
+    for item in s["daily_trend"]:
+        trend_rows += f"<tr><td>{item['date']}</td><td>{item['count']}</td></tr>"
+
+    # 构建来源表格行
+    referer_rows = ""
+    for item in s["referer_stats"]:
+        referer_rows += f"<tr><td>{item['referer']}</td><td>{item['count']}</td></tr>"
+
+    if not style_rows:
+        style_rows = "<tr><td colspan='2'>暂无数据</td></tr>"
+    if not trend_rows:
+        trend_rows = "<tr><td colspan='2'>暂无数据</td></tr>"
+    if not referer_rows:
+        referer_rows = "<tr><td colspan='2'>暂无数据</td></tr>"
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>访问统计 - 公众号排版工具</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #f5f5f5; }}
+  h1 {{ color: #333; }}
+  .card {{ background: white; border-radius: 8px; padding: 20px; margin: 16px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+  .metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }}
+  .metric {{ text-align: center; padding: 16px; background: #f0f7ff; border-radius: 8px; }}
+  .metric .num {{ font-size: 28px; font-weight: bold; color: #1890ff; }}
+  .metric .label {{ font-size: 13px; color: #666; }}
+  table {{ width: 100%; border-collapse: collapse; }}
+  th, td {{ padding: 8px 12px; text-align: left; border-bottom: 1px solid #eee; }}
+  th {{ background: #fafafa; color: #666; font-size: 13px; }}
+  .updated {{ color: #999; font-size: 13px; margin-top: 20px; }}
+  a {{ color: #1890ff; text-decoration: none; }}
+</style>
+</head>
+<body>
+<h1>📊 访问统计</h1>
+<p class="updated">更新时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+
+<div class="card">
+  <h3>核心指标</h3>
+  <div class="metrics">
+    <div class="metric"><div class="num">{s["today_visits"]}</div><div class="label">今日访问</div></div>
+    <div class="metric"><div class="num">{s["today_uv"]}</div><div class="label">今日独立访客</div></div>
+    <div class="metric"><div class="num">{s["today_api_calls"]}</div><div class="label">今日排版次数</div></div>
+    <div class="metric"><div class="num">{s["total_visits"]}</div><div class="label">累计访问</div></div>
+    <div class="metric"><div class="num">{s["total_uv"]}</div><div class="label">累计独立访客</div></div>
+    <div class="metric"><div class="num">{s["total_api_calls"]}</div><div class="label">累计排版次数</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>风格使用统计</h3>
+  <table><tr><th>风格</th><th>使用次数</th></tr>{style_rows}</table>
+</div>
+
+<div class="card">
+  <h3>最近7天访问趋势</h3>
+  <table><tr><th>日期</th><th>访问次数</th></tr>{trend_rows}</table>
+</div>
+
+<div class="card">
+  <h3>访问来源</h3>
+  <table><tr><th>来源</th><th>次数</th></tr>{referer_rows}</table>
+</div>
+
+<p><a href="/">← 返回首页</a></p>
+</body>
+</html>"""
+    return HTMLResponse(html)
 
 
 # 静态文件服务（前端）
