@@ -31,6 +31,32 @@
     .topic-chip:hover { background: #c8a96e; color: #fff; border-color: #c8a96e; }
     .ai-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
       border-radius: 10px; font-size: 10px; font-weight: 600; background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; }
+    /* 反馈按钮和弹窗 */
+    .feedback-fab { position: fixed; bottom: 24px; right: 24px; width: 48px; height: 48px;
+      border-radius: 50%; background: #5c4a2a; color: #fff; border: none; cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center;
+      font-size: 20px; transition: all 0.2s; z-index: 1000; }
+    .feedback-fab:hover { transform: scale(1.08); background: #8a7560; }
+    .feedback-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+      z-index: 2000; align-items: center; justify-content: center; }
+    .feedback-modal-overlay.show { display: flex; }
+    .feedback-modal { background: #fff; border-radius: 16px; padding: 24px; width: 90%; max-width: 400px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+    .feedback-modal h3 { margin: 0 0 8px; font-size: 16px; color: #333; }
+    .feedback-modal p { margin: 0 0 16px; font-size: 13px; color: #999; }
+    .feedback-modal textarea { width: 100%; height: 120px; border: 1px solid #e0d5c0; border-radius: 10px;
+      padding: 12px; font-size: 14px; resize: vertical; box-sizing: border-box; }
+    .feedback-modal textarea:focus { outline: none; border-color: #c8a96e; box-shadow: 0 0 0 3px rgba(200,169,110,0.15); }
+    .feedback-modal .modal-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+    .feedback-modal .btn-cancel { padding: 8px 20px; border-radius: 8px; border: 1px solid #ddd;
+      background: #fff; color: #666; font-size: 13px; cursor: pointer; }
+    .feedback-modal .btn-submit { padding: 8px 20px; border-radius: 8px; border: none;
+      background: #5c4a2a; color: #fff; font-size: 13px; cursor: pointer; }
+    .feedback-modal .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+    .feedback-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 3000;
+      padding: 10px 24px; border-radius: 10px; font-size: 14px; color: #fff; opacity: 0; transition: opacity 0.3s;
+      pointer-events: none; background: #5c4a2a; }
+    .feedback-toast.show { opacity: 1; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -585,6 +611,82 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
     document.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generate();
     });
+
+    // ── 反馈功能 ──
+    function openFeedback() {
+      document.getElementById('feedback-modal').classList.add('show');
+      document.getElementById('feedback-content').focus();
+    }
+
+    function closeFeedback() {
+      document.getElementById('feedback-modal').classList.remove('show');
+      document.getElementById('feedback-content').value = '';
+    }
+
+    // 点击遮罩关闭
+    document.getElementById('feedback-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeFeedback();
+    });
+
+    // ESC 关闭
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && document.getElementById('feedback-modal').classList.contains('show')) {
+        closeFeedback();
+      }
+    });
+
+    async function submitFeedback() {
+      const content = document.getElementById('feedback-content').value.trim();
+      if (!content) return;
+
+      const btn = document.getElementById('feedback-submit-btn');
+      btn.disabled = true;
+      btn.textContent = '提交中...';
+
+      try {
+        const res = await fetch(API_BASE + '/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content })
+        });
+
+        if (!res.ok) throw new Error('提交失败');
+
+        showToast('感谢你的反馈！🙏');
+        closeFeedback();
+      } catch (e) {
+        showToast('提交失败，请稍后再试');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '提交';
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('feedback-toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    }
   </script>
+  <!-- 反馈按钮 -->
+  <button class="feedback-fab" onclick="openFeedback()" title="提建议">💬</button>
+
+  <!-- 反馈弹窗 -->
+  <div class="feedback-modal-overlay" id="feedback-modal">
+    <div class="feedback-modal">
+      <h3>💬 提个建议</h3>
+      <p>任何想法、建议或 bug 反馈，帮我把工具做得更好 🙏</p>
+      <textarea id="feedback-content" placeholder="说说你的想法...（例如：希望增加xxx功能、这里的体验不太好...）"></textarea>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeFeedback()">取消</button>
+        <button class="btn-submit" id="feedback-submit-btn" onclick="submitFeedback()">提交</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 提示 -->
+  <div class="feedback-toast" id="feedback-toast"></div>
+
 </body>
 </html>

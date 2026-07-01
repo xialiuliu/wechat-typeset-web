@@ -169,6 +169,15 @@ def _init_stats_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_visits_ts ON visits(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_api_ts ON api_calls(ts)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedbacks (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts       TEXT    NOT NULL,
+            ip       TEXT    NOT NULL,
+            content  TEXT    NOT NULL,
+            contact  TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -1192,6 +1201,28 @@ async def stats_page():
     if not referer_rows:
         referer_rows = "<tr><td colspan='2'>暂无数据</td></tr>"
 
+    # 反馈列表
+    feedback_html = ""
+    try:
+        conn = sqlite3.connect(STATS_DB)
+        cur = conn.cursor()
+        cur.execute("SELECT id, ts, content, contact FROM feedbacks ORDER BY id DESC LIMIT 30")
+        feedbacks = cur.fetchall()
+        conn.close()
+        for fb in feedbacks:
+            fb_ts = fb[1][:16].replace("T", " ")
+            fb_content = fb[2].replace("<", "&lt;").replace(">", "&gt;")
+            fb_contact = fb[3] or ""
+            feedback_html += f'<div style="padding:12px;border-bottom:1px solid #f0f0f0;"><div style="font-size:12px;color:#999;margin-bottom:4px;">{fb_ts}</div><div style="font-size:14px;color:#333;line-height:1.6;">{fb_content}</div>'
+            if fb_contact:
+                feedback_html += f'<div style="font-size:12px;color:#1890ff;margin-top:4px;">联系方式: {fb_contact}</div>'
+            feedback_html += '</div>'
+    except Exception:
+        feedback_html = "<p>暂无反馈数据</p>"
+
+    if not feedback_html:
+        feedback_html = "<p style='color:#999;text-align:center;padding:20px;'>暂无反馈数据</p>"
+
     html = f"""<!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -1244,10 +1275,59 @@ async def stats_page():
   <table><tr><th>来源</th><th>次数</th></tr>{referer_rows}</table>
 </div>
 
+<div class="card">
+  <h3>用户反馈</h3>
+  {feedback_html}
+</div>
+
 <p><a href="/">← 返回首页</a></p>
 </body>
 </html>"""
     return HTMLResponse(html)
+
+
+# ── 用户反馈 ──
+
+class FeedbackRequest(BaseModel):
+    content: str           # 反馈内容
+    contact: str = ""      # 可选：联系方式
+
+
+@app.post("/api/feedback")
+async def submit_feedback(req: FeedbackRequest, request: Request):
+    """接收用户反馈意见"""
+    content = req.content.strip()
+    if not content:
+        raise HTTPException(400, "反馈内容不能为空")
+    if len(content) > 2000:
+        raise HTTPException(400, "反馈内容不能超过2000字")
+
+    ip = request.client.host if request.client else "-"
+    contact = req.contact.strip()[:200] if req.contact else ""
+
+    try:
+        conn = sqlite3.connect(STATS_DB)
+        conn.execute(
+            "INSERT INTO feedbacks (ts, ip, content, contact) VALUES (?,?,?,?)",
+            (datetime.now().isoformat(), ip, content, contact),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(500, f"反馈提交失败：{str(e)}")
+
+    return {"success": True, "message": "感谢你的反馈！"}
+
+
+@app.get("/api/feedbacks")
+async def list_feedbacks():
+    """获取反馈列表（用于统计页展示）"""
+    conn = sqlite3.connect(STATS_DB)
+    cur = conn.cursor()
+    cur.execute("SELECT id, ts, content, contact FROM feedbacks ORDER BY id DESC LIMIT 50")
+    rows = [{"id": r[0], "ts": r[1], "content": r[2], "contact": r[3]} for r in cur.fetchall()]
+    conn.close()
+    return {"count": len(rows), "items": rows}
 
 
 # 静态文件服务（前端）
