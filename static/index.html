@@ -263,6 +263,9 @@
             <span>实时预览</span>
           </div>
           <div class="flex items-center gap-2">
+            <button id="copy-top-btn" onclick="copyPreviewHtml()" class="text-xs px-3 py-1.5 rounded-md font-medium text-white transition hover:opacity-90 active:scale-95 hidden" style="background:linear-gradient(135deg,#c8a96e,#a07840)">
+              复制
+            </button>
             <span id="style-badge" class="text-xs px-2 py-0.5 rounded-full" style="background:#f5f0e8;color:#5c4a2a">禅意古朴</span>
             <span id="ai-badge-result" class="ai-badge hidden">AI 写作</span>
           </div>
@@ -487,6 +490,9 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       // 使用 srcdoc 渲染，避免额外请求
       const wrapped = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:0;}</style></head><body>${html}</body></html>`;
       iframe.srcdoc = wrapped;
+
+      // 显示顶部复制按钮
+      document.getElementById('copy-top-btn').classList.remove('hidden');
     }
 
     function showPreviewEmpty() {
@@ -497,6 +503,7 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       setPreviewStatus('idle', '实时预览');
       currentPreviewHtml = '';
       document.getElementById('copy-preview-btn').classList.add('hidden');
+      document.getElementById('copy-top-btn').classList.add('hidden');
     }
 
     function showPreviewLoading() {
