@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>公众号排版工具 — AI 写作 + 三秒排版</title>
+  <title>公众号排版工具 — AI 写作 + 实时预览</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <style>
     body { background: #f5f2ed; }
@@ -20,7 +20,6 @@
     .loading-dot:nth-child(2) { animation-delay:.2s; }
     .loading-dot:nth-child(3) { animation-delay:.4s; }
     .copy-success { color: #3B6D11; }
-    #result-section { transition: all 0.3s ease; }
     .style-preview { font-size: 11px; opacity: 0.7; margin-top: 4px; }
     .mode-tab { cursor: pointer; padding: 8px 16px; font-size: 13px; font-weight: 500;
       border-bottom: 2px solid transparent; color: #888; transition: all 0.2s; }
@@ -31,6 +30,26 @@
     .topic-chip:hover { background: #c8a96e; color: #fff; border-color: #c8a96e; }
     .ai-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
       border-radius: 10px; font-size: 10px; font-weight: 600; background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; }
+
+    /* 预览区 */
+    #preview-iframe { width: 100%; height: 100%; border: none; background: #fff; }
+    .preview-container { height: calc(100vh - 120px); min-height: 500px; overflow: hidden; }
+    .preview-toolbar { display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 16px; border-bottom: 1px solid #f0f0f0; background: #fafafa; }
+    .preview-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #999; }
+    .preview-status.synced { color: #52c41a; }
+    .preview-status.loading { color: #c8a96e; }
+
+    /* 图片拖拽提示 */
+    .drop-hint { pointer-events: none; position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center; background: rgba(200,169,110,0.08);
+      border: 2px dashed #c8a96e; border-radius: 12px; opacity: 0; transition: opacity 0.2s; z-index: 10; }
+    .textarea-wrapper.dragover .drop-hint { opacity: 1; }
+    .textarea-wrapper { position: relative; }
+    .drop-hint-content { text-align: center; }
+    .drop-hint-content span { font-size: 32px; display: block; margin-bottom: 4px; }
+    .drop-hint-content p { font-size: 13px; color: #5c4a2a; font-weight: 500; }
+
     /* 反馈按钮和弹窗 */
     .feedback-fab { position: fixed; bottom: 24px; right: 24px; width: 48px; height: 48px;
       border-radius: 50%; background: #5c4a2a; color: #fff; border: none; cursor: pointer;
@@ -57,6 +76,16 @@
       padding: 10px 24px; border-radius: 10px; font-size: 14px; color: #fff; opacity: 0; transition: opacity 0.3s;
       pointer-events: none; background: #5c4a2a; }
     .feedback-toast.show { opacity: 1; }
+
+    /* 生成链接区 */
+    .link-bar { padding: 12px 16px; border-top: 1px solid #f0f0f0; background: #fff; }
+    .link-bar.hidden { display: none; }
+    .link-bar a { word-break: break-all; }
+
+    /* 上传进度 */
+    .upload-progress { position: absolute; bottom: 8px; right: 8px; background: #5c4a2a; color: #fff;
+      padding: 4px 10px; border-radius: 8px; font-size: 11px; display: none; z-index: 20; }
+    .upload-progress.show { display: block; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -72,17 +101,17 @@
           公众号排版工具
           <span class="ai-badge">AI</span>
         </h1>
-        <p class="text-xs text-gray-400">AI 写作 · 智能排版 · 一键生成</p>
+        <p class="text-xs text-gray-400">AI 写作 · 智能排版 · 实时预览</p>
       </div>
     </div>
     <div class="text-xs text-gray-400 hidden sm:block">支持禅意古朴 / 极简现代 / 科技商务</div>
   </header>
 
-  <main class="max-w-5xl mx-auto px-4 py-8">
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <main class="px-4 py-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
       <!-- 左侧：输入区 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
 
         <!-- 模式切换 -->
         <div class="flex border-b border-gray-100">
@@ -97,15 +126,19 @@
         <!-- 直接排版模式 -->
         <div id="typeset-panel">
           <div class="px-5 py-3 border-b border-gray-50 flex items-center justify-between">
-            <h2 class="text-sm font-medium text-gray-700">输入文案</h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-medium text-gray-700">输入文案</h2>
+              <span class="text-xs text-gray-400">支持拖拽/粘贴图片</span>
+            </div>
             <button onclick="clearInput()" class="text-xs text-gray-400 hover:text-gray-600 transition">清空</button>
           </div>
 
           <div class="p-5">
-            <textarea
-              id="markdown-input"
-              class="w-full h-64 text-sm text-gray-700 border border-gray-200 rounded-xl p-4 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder-gray-300"
-              placeholder="在此粘贴文案，支持纯文字或 Markdown...
+            <div class="textarea-wrapper" id="textarea-wrapper">
+              <textarea
+                id="markdown-input"
+                class="w-full h-72 text-sm text-gray-700 border border-gray-200 rounded-xl p-4 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder-gray-300"
+                placeholder="在此粘贴文案，支持纯文字或 Markdown...
 
 直接写就行，系统会自动识别：
 - 第一行 → 文章标题
@@ -115,7 +148,16 @@
 - 注意/建议 → 金边卡片
 - 一、二、三 → 章节标题
 
-也可以用 Markdown 格式：## 标题、> 引用、- 列表"></textarea>
+也可以用 Markdown 格式：## 标题、> 引用、- 列表
+支持拖拽/粘贴图片自动嵌入"></textarea>
+              <div class="drop-hint">
+                <div class="drop-hint-content">
+                  <span>🖼️</span>
+                  <p>松开放入图片</p>
+                </div>
+              </div>
+              <div class="upload-progress" id="upload-progress">上传中...</div>
+            </div>
 
             <!-- 示例按钮 -->
             <div class="mt-3 flex gap-2 flex-wrap">
@@ -134,7 +176,6 @@
           </div>
 
           <div class="p-5 space-y-4">
-            <!-- 话题输入 -->
             <div>
               <label class="text-xs text-gray-500 mb-1 block">写作指令</label>
               <input
@@ -145,7 +186,6 @@
               />
             </div>
 
-            <!-- 快速话题 -->
             <div>
               <label class="text-xs text-gray-500 mb-2 block">热门话题</label>
               <div class="flex flex-wrap gap-2">
@@ -158,7 +198,6 @@
               </div>
             </div>
 
-            <!-- 参考资料（可选） -->
             <div>
               <label class="text-xs text-gray-500 mb-1 block">参考资料（可选）</label>
               <textarea
@@ -171,7 +210,7 @@
         </div>
 
         <!-- 风格选择（两个模式共用） -->
-        <div class="px-5 pb-4">
+        <div class="px-5 pb-3 mt-auto">
           <p class="text-xs text-gray-500 mb-3 font-medium">选择排版风格</p>
           <div class="grid grid-cols-3 gap-3">
 
@@ -196,120 +235,134 @@
           </div>
         </div>
 
-        <!-- 生成按钮 -->
-        <div class="px-5 pb-5">
+        <!-- 操作按钮 -->
+        <div class="px-5 pb-5 flex gap-3">
           <button
             id="generate-btn"
             onclick="generate()"
-            class="w-full py-3 rounded-xl text-white font-medium text-sm transition-all shadow-sm hover:shadow-md active:scale-95"
+            class="flex-1 py-3 rounded-xl text-white font-medium text-sm transition-all shadow-sm hover:shadow-md active:scale-95"
             style="background: linear-gradient(135deg, #c8a96e 0%, #a07840 100%);">
-            生成排版预览
+            获取预览链接
+          </button>
+          <button
+            id="copy-preview-btn"
+            onclick="copyPreviewHtml()"
+            class="py-3 px-4 rounded-xl text-sm font-medium border border-gray-200 text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition hidden"
+            title="复制当前预览的 HTML 到剪贴板">
+            复制预览
           </button>
         </div>
       </div>
 
-      <!-- 右侧：结果区 -->
-      <div id="result-section" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <!-- 右侧：实时预览区 -->
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
 
-        <!-- 空状态 -->
-        <div id="empty-state" class="h-full flex flex-col items-center justify-center p-12 text-center">
-          <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style="background:#f5f0e8">
-            <span class="text-2xl">✦</span>
+        <!-- 预览工具栏 -->
+        <div class="preview-toolbar">
+          <div class="preview-status" id="preview-status">
+            <span>实时预览</span>
           </div>
-          <p class="text-gray-500 text-sm font-medium mb-1">排版结果将显示在这里</p>
-          <p class="text-gray-400 text-xs">输入文案后点击「生成排版预览」</p>
-        </div>
-
-        <!-- 加载中 -->
-        <div id="loading-state" class="hidden h-full flex flex-col items-center justify-center p-12 text-center">
-          <div class="flex gap-2 mb-4">
-            <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
-            <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
-            <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
-          </div>
-          <p class="text-gray-500 text-sm" id="loading-text">正在生成排版...</p>
-          <p class="text-gray-400 text-xs mt-2" id="loading-sub"></p>
-        </div>
-
-        <!-- 结果 -->
-        <div id="success-state" class="hidden flex flex-col h-full">
-          <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <div class="w-2 h-2 rounded-full bg-green-400"></div>
-              <h2 class="text-sm font-medium text-gray-700">排版完成</h2>
-              <span id="style-badge" class="text-xs px-2 py-0.5 rounded-full" style="background:#f5f0e8;color:#5c4a2a">禅意古朴</span>
-              <span id="ai-badge-result" class="ai-badge hidden">AI 写作</span>
-            </div>
-            <button onclick="reset()" class="text-xs text-gray-400 hover:text-gray-600 transition">重新排版</button>
-          </div>
-
-          <!-- 预览链接 -->
-          <div class="p-5 flex-1">
-            <div class="preview-card rounded-xl p-4 mb-4">
-              <p class="text-xs text-gray-500 mb-2">预览链接</p>
-              <a id="preview-link" href="#" target="_blank" class="text-sm text-amber-700 font-medium hover:underline break-all" style="word-break:break-all">
-                https://edit.shiker.tech/copy.html?id=...
-              </a>
-            </div>
-
-            <!-- AI 生成的文章内容（可编辑后重新排版） -->
-            <div id="ai-article-section" class="hidden mb-4">
-              <div class="flex items-center justify-between mb-2">
-                <p class="text-xs text-gray-500">AI 生成的文章（可编辑后重新排版）</p>
-                <button onclick="retypesetArticle()" class="text-xs text-amber-600 hover:text-amber-800 underline">编辑后重新排版</button>
-              </div>
-              <textarea
-                id="ai-article-content"
-                class="w-full h-32 text-xs text-gray-600 border border-gray-200 rounded-lg p-3 focus:outline-none focus:border-amber-400 font-mono"
-              ></textarea>
-            </div>
-
-            <!-- 操作按钮 -->
-            <div class="flex flex-col gap-3">
-              <a id="open-btn" href="#" target="_blank"
-                class="flex items-center justify-center gap-2 py-3 rounded-xl text-white text-sm font-medium transition hover:opacity-90"
-                style="background: linear-gradient(135deg, #c8a96e 0%, #a07840 100%);">
-                <span>打开预览页面</span>
-                <span class="text-xs opacity-80">→</span>
-              </a>
-
-              <button onclick="copyLink()"
-                class="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
-                <span id="copy-btn-text">复制预览链接</span>
-              </button>
-            </div>
-
-            <!-- 使用提示 -->
-            <div class="mt-4 p-3 bg-gray-50 rounded-xl">
-              <p class="text-xs text-gray-500 leading-relaxed">
-                打开预览页面后，点击页面上的「复制到微信」按钮，再粘贴到公众号编辑器即可。
-              </p>
-            </div>
+          <div class="flex items-center gap-2">
+            <span id="style-badge" class="text-xs px-2 py-0.5 rounded-full" style="background:#f5f0e8;color:#5c4a2a">禅意古朴</span>
+            <span id="ai-badge-result" class="ai-badge hidden">AI 写作</span>
           </div>
         </div>
 
-        <!-- 错误状态 -->
-        <div id="error-state" class="hidden h-full flex flex-col items-center justify-center p-12 text-center">
-          <div class="w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-red-50">
-            <span class="text-red-400 text-xl">✕</span>
+        <!-- 预览 iframe -->
+        <div class="preview-container flex-1">
+          <!-- 空状态 -->
+          <div id="preview-empty" class="h-full flex flex-col items-center justify-center p-12 text-center">
+            <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style="background:#f5f0e8">
+              <span class="text-2xl">✦</span>
+            </div>
+            <p class="text-gray-500 text-sm font-medium mb-1">实时预览区域</p>
+            <p class="text-gray-400 text-xs">在左侧输入文案，效果实时呈现</p>
           </div>
-          <p class="text-gray-700 text-sm font-medium mb-1">生成失败</p>
-          <p id="error-msg" class="text-gray-400 text-xs mb-4">请检查服务是否正常运行</p>
-          <button onclick="generate()" class="text-xs text-amber-600 hover:text-amber-800 underline">重试</button>
+
+          <!-- 加载中 -->
+          <div id="preview-loading" class="hidden h-full flex flex-col items-center justify-center p-12 text-center">
+            <div class="flex gap-2 mb-4">
+              <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
+              <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
+              <div class="loading-dot w-3 h-3 rounded-full" style="background:#c8a96e"></div>
+            </div>
+            <p class="text-gray-500 text-sm">渲染中...</p>
+          </div>
+
+          <!-- iframe -->
+          <iframe id="preview-iframe" class="hidden"></iframe>
+
+          <!-- 错误 -->
+          <div id="preview-error" class="hidden h-full flex flex-col items-center justify-center p-12 text-center">
+            <div class="w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-red-50">
+              <span class="text-red-400 text-xl">✕</span>
+            </div>
+            <p class="text-gray-700 text-sm font-medium mb-1">预览失败</p>
+            <p id="preview-error-msg" class="text-gray-400 text-xs"></p>
+          </div>
+        </div>
+
+        <!-- 预览链接区（生成后显示） -->
+        <div id="link-bar" class="link-bar hidden">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-xs text-gray-500 font-medium">预览链接</p>
+            <button onclick="copyLink()" class="text-xs text-amber-600 hover:text-amber-800">复制链接</button>
+          </div>
+          <div class="flex items-center gap-2">
+            <a id="preview-link" href="#" target="_blank" class="text-sm text-amber-700 font-medium hover:underline break-all flex-1" style="word-break:break-all"></a>
+            <a id="open-btn" href="#" target="_blank"
+              class="px-4 py-2 rounded-lg text-xs text-white font-medium transition hover:opacity-90 whitespace-nowrap"
+              style="background: linear-gradient(135deg, #c8a96e 0%, #a07840 100%);">
+              打开 →
+            </a>
+          </div>
+        </div>
+
+        <!-- AI 文章编辑区（生成后显示） -->
+        <div id="ai-article-section" class="hidden px-4 pb-3">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-xs text-gray-500">AI 生成的文章（可编辑后重新排版）</p>
+            <button onclick="retypesetArticle()" class="text-xs text-amber-600 hover:text-amber-800 underline">编辑后重新排版</button>
+          </div>
+          <textarea
+            id="ai-article-content"
+            class="w-full h-28 text-xs text-gray-600 border border-gray-200 rounded-lg p-3 focus:outline-none focus:border-amber-400 font-mono"
+          ></textarea>
         </div>
 
       </div>
     </div>
 
     <!-- 底部说明 -->
-    <div class="mt-6 text-center">
-      <p class="text-xs text-gray-400">支持 AI 写作 / 纯文字 / Markdown · 智能识别语义 · 一键复制到公众号</p>
+    <div class="mt-4 text-center">
+      <p class="text-xs text-gray-400">支持 AI 写作 / 纯文字 / Markdown · 智能识别语义 · 左侧输入右侧实时预览 · 支持拖拽/粘贴图片</p>
     </div>
   </main>
 
+  <!-- 反馈按钮 -->
+  <button class="feedback-fab" onclick="openFeedback()" title="提建议">💬</button>
+
+  <!-- 反馈弹窗 -->
+  <div class="feedback-modal-overlay" id="feedback-modal">
+    <div class="feedback-modal">
+      <h3>💬 提个建议</h3>
+      <p>任何想法、建议或 bug 反馈，帮我把工具做得更好 🙏</p>
+      <textarea id="feedback-content" placeholder="说说你的想法...（例如：希望增加xxx功能、这里的体验不太好...）"></textarea>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeFeedback()">取消</button>
+        <button class="btn-submit" id="feedback-submit-btn" onclick="submitFeedback()">提交</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 提示 -->
+  <div class="feedback-toast" id="feedback-toast"></div>
+
   <script>
     let currentStyle = 'zen';
-    let currentMode = 'typeset';  // 'typeset' | 'ai'
+    let currentMode = 'typeset';
+    let currentPreviewHtml = '';
+    let previewTimer = null;
     const API_BASE = window.location.origin;
 
     const EXAMPLES = {
@@ -377,7 +430,210 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
 慢下来，不是退步，是找回被速度带走的那部分自己。`
     };
 
-    // ── 模式切换 ──
+    // ═══════════════ 实时预览 ═══════════════
+
+    function getInputText() {
+      const ta = document.getElementById('markdown-input');
+      return ta ? ta.value : '';
+    }
+
+    function triggerPreview() {
+      if (currentMode !== 'typeset') return;
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(doPreview, 300);
+    }
+
+    async function doPreview() {
+      const markdown = getInputText();
+      if (!markdown.trim()) {
+        showPreviewEmpty();
+        return;
+      }
+
+      showPreviewLoading();
+
+      try {
+        const res = await fetch(API_BASE + '/api/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown, style: currentStyle })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || '预览失败');
+        }
+
+        const data = await res.json();
+        currentPreviewHtml = data.html;
+        renderPreview(data.html);
+        setPreviewStatus('synced', '已同步');
+      } catch (e) {
+        showPreviewError(e.message);
+      }
+    }
+
+    function renderPreview(html) {
+      const iframe = document.getElementById('preview-iframe');
+      const empty = document.getElementById('preview-empty');
+      const loading = document.getElementById('preview-loading');
+      const error = document.getElementById('preview-error');
+
+      empty.classList.add('hidden');
+      loading.classList.add('hidden');
+      error.classList.add('hidden');
+      iframe.classList.remove('hidden');
+
+      // 使用 srcdoc 渲染，避免额外请求
+      const wrapped = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:0;}</style></head><body>${html}</body></html>`;
+      iframe.srcdoc = wrapped;
+    }
+
+    function showPreviewEmpty() {
+      document.getElementById('preview-iframe').classList.add('hidden');
+      document.getElementById('preview-loading').classList.add('hidden');
+      document.getElementById('preview-error').classList.add('hidden');
+      document.getElementById('preview-empty').classList.remove('hidden');
+      setPreviewStatus('idle', '实时预览');
+      currentPreviewHtml = '';
+      document.getElementById('copy-preview-btn').classList.add('hidden');
+    }
+
+    function showPreviewLoading() {
+      document.getElementById('preview-empty').classList.add('hidden');
+      document.getElementById('preview-iframe').classList.add('hidden');
+      document.getElementById('preview-error').classList.add('hidden');
+      document.getElementById('preview-loading').classList.remove('hidden');
+      setPreviewStatus('loading', '渲染中...');
+    }
+
+    function showPreviewError(msg) {
+      document.getElementById('preview-iframe').classList.add('hidden');
+      document.getElementById('preview-empty').classList.add('hidden');
+      document.getElementById('preview-loading').classList.add('hidden');
+      document.getElementById('preview-error').classList.remove('hidden');
+      document.getElementById('preview-error-msg').textContent = msg;
+      setPreviewStatus('error', '预览失败');
+      document.getElementById('copy-preview-btn').classList.add('hidden');
+    }
+
+    function setPreviewStatus(cls, text) {
+      const el = document.getElementById('preview-status');
+      el.className = 'preview-status ' + cls;
+      el.querySelector('span').textContent = text;
+    }
+
+    // ── 监听输入变化 ──
+    document.getElementById('markdown-input').addEventListener('input', triggerPreview);
+
+    // ── 复制预览 HTML ──
+    async function copyPreviewHtml() {
+      if (!currentPreviewHtml) return;
+      try {
+        // 用 Clipboard API 写入 HTML 格式
+        const blob = new Blob([currentPreviewHtml], { type: 'text/html' });
+        const item = new ClipboardItem({
+          'text/html': blob,
+          'text/plain': new Blob([getInputText()], { type: 'text/plain' })
+        });
+        await navigator.clipboard.write([item]);
+        showToast('已复制！可直接粘贴到公众号编辑器');
+      } catch {
+        // 降级方案：复制到不可见元素后手动复制
+        await navigator.clipboard.writeText(getInputText());
+        showToast('已复制文本（HTML 复制请用预览链接）');
+      }
+    }
+
+    // ═══════════════ 图片拖拽 & 粘贴 ═══════════════
+
+    function setupImageUpload() {
+      const ta = document.getElementById('markdown-input');
+      const wrapper = document.getElementById('textarea-wrapper');
+
+      // 拖拽
+      wrapper.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer.types.includes('Files')) {
+          wrapper.classList.add('dragover');
+        }
+      });
+
+      wrapper.addEventListener('dragleave', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        wrapper.classList.remove('dragover');
+      });
+
+      wrapper.addEventListener('drop', async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        wrapper.classList.remove('dragover');
+
+        const files = Array.from(e.dataTransfer.files);
+        await handleImageFiles(files, ta);
+      });
+
+      // 粘贴
+      ta.addEventListener('paste', async e => {
+        const items = Array.from(e.clipboardData.items);
+        const imageItems = items.filter(item => item.type.startsWith('image/'));
+        if (imageItems.length === 0) return;
+
+        e.preventDefault();
+        const files = imageItems.map(item => item.getAsFile());
+        await handleImageFiles(files, ta);
+      });
+    }
+
+    async function handleImageFiles(files, ta) {
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) continue;
+
+        showUploadProgress(true);
+        try {
+          const dataUri = await uploadImage(file);
+          insertAtCursor(ta, `\n![](${dataUri})\n`);
+          showToast('图片已嵌入');
+          triggerPreview();
+        } catch (e) {
+          showToast('图片上传失败: ' + e.message);
+        }
+        showUploadProgress(false);
+      }
+    }
+
+    async function uploadImage(file) {
+      const res = await fetch(API_BASE + '/api/upload-image', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type },
+        body: file
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || '上传失败');
+      }
+
+      const data = await res.json();
+      return data.data_uri;
+    }
+
+    function showUploadProgress(show) {
+      document.getElementById('upload-progress').classList.toggle('show', show);
+    }
+
+    function insertAtCursor(ta, text) {
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      ta.value = ta.value.substring(0, start) + text + ta.value.substring(end);
+      ta.selectionStart = ta.selectionEnd = start + text.length;
+      ta.focus();
+    }
+
+    // ═══════════════ 模式 & 风格 ═══════════════
+
     function switchMode(mode) {
       currentMode = mode;
       document.getElementById('mode-typeset').classList.toggle('active', mode === 'typeset');
@@ -385,12 +641,12 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       document.getElementById('typeset-panel').classList.toggle('hidden', mode !== 'typeset');
       document.getElementById('ai-panel').classList.toggle('hidden', mode !== 'ai');
 
-      // 更新按钮文字
       const btn = document.getElementById('generate-btn');
       if (mode === 'ai') {
         btn.textContent = 'AI 生成 + 排版';
       } else {
-        btn.textContent = '生成排版预览';
+        btn.textContent = '获取预览链接';
+        triggerPreview();
       }
     }
 
@@ -399,7 +655,6 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       document.getElementById('ai-prompt').focus();
     }
 
-    // ── 风格选择 ──
     function selectStyle(style) {
       currentStyle = style;
       ['zen','minimal','tech'].forEach(s => {
@@ -407,38 +662,45 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       });
       document.getElementById('btn-' + style).classList.add('active');
 
-      const btn = document.getElementById('generate-btn');
       const gradients = {
         zen: 'linear-gradient(135deg, #c8a96e 0%, #a07840 100%)',
         minimal: 'linear-gradient(135deg, #378add 0%, #185fa5 100%)',
         tech: 'linear-gradient(135deg, #1a2d4a 0%, #0c1e33 100%)',
       };
-      btn.style.background = gradients[style];
+      document.getElementById('generate-btn').style.background = gradients[style];
+
+      // 更新徽章
+      const badge = document.getElementById('style-badge');
+      const labels = { zen:'禅意古朴', minimal:'极简现代', tech:'科技商务' };
+      const badgeColors = {
+        zen: { bg: '#f5f0e8', color: '#5c4a2a' },
+        minimal: { bg: '#e6f1fb', color: '#185fa5' },
+        tech: { bg: '#eef0f5', color: '#1a2d4a' },
+      };
+      badge.textContent = labels[style];
+      const bc = badgeColors[style];
+      badge.style.background = bc.bg;
+      badge.style.color = bc.color;
+
+      // 实时预览模式下立即刷新
+      if (currentMode === 'typeset') triggerPreview();
     }
 
     function clearInput() {
       document.getElementById('markdown-input').value = '';
       document.getElementById('markdown-input').focus();
+      showPreviewEmpty();
     }
 
     function fillExample(style) {
       switchMode('typeset');
       selectStyle(style);
       document.getElementById('markdown-input').value = EXAMPLES[style];
+      triggerPreview();
     }
 
-    function showState(name) {
-      ['empty-state','loading-state','success-state','error-state'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.toggle('hidden', !id.startsWith(name));
-      });
-    }
+    // ═══════════════ 生成预览链接 ═══════════════
 
-    function reset() {
-      showState('empty');
-    }
-
-    // ── 生成 ──
     async function generate() {
       if (currentMode === 'ai') {
         return generateAI();
@@ -447,16 +709,14 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
     }
 
     async function generateTypeset() {
-      const markdown = document.getElementById('markdown-input').value.trim();
+      const markdown = getInputText();
       if (!markdown) {
         document.getElementById('markdown-input').focus();
-        document.getElementById('markdown-input').placeholder = '请先输入文案内容...';
+        showToast('请先输入文案内容');
         return;
       }
 
-      showState('loading');
-      document.getElementById('loading-text').textContent = '正在生成' + getStyleLabel() + '排版...';
-      document.getElementById('loading-sub').textContent = '';
+      setPreviewStatus('loading', '生成预览链接中...');
 
       try {
         const res = await fetch(API_BASE + '/api/typeset', {
@@ -471,10 +731,11 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
         }
 
         const data = await res.json();
-        showResult(data);
+        showLinkBar(data);
+        setPreviewStatus('synced', '已生成');
       } catch (e) {
-        showState('error');
-        document.getElementById('error-msg').textContent = e.message;
+        setPreviewStatus('error', '生成失败');
+        showToast(e.message);
       }
     }
 
@@ -482,13 +743,14 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       const prompt = document.getElementById('ai-prompt').value.trim();
       if (!prompt) {
         document.getElementById('ai-prompt').focus();
-        document.getElementById('ai-prompt').placeholder = '请输入写作指令或话题...';
+        showToast('请输入写作指令或话题');
         return;
       }
 
-      showState('loading');
-      document.getElementById('loading-text').textContent = 'AI 正在写文章...';
-      document.getElementById('loading-sub').textContent = '大约需要 10-20 秒';
+      setPreviewStatus('loading', 'AI 正在写文章...');
+      document.getElementById('preview-empty').classList.add('hidden');
+      document.getElementById('preview-iframe').classList.add('hidden');
+      document.getElementById('preview-loading').classList.remove('hidden');
 
       try {
         const reference = document.getElementById('ai-reference').value.trim();
@@ -508,35 +770,33 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
 
         const data = await res.json();
 
-        // 显示 AI 生成的文章内容
         document.getElementById('ai-article-section').classList.remove('hidden');
         document.getElementById('ai-article-content').value = data.article;
         document.getElementById('ai-badge-result').classList.remove('hidden');
 
-        showResult(data);
+        showLinkBar(data);
+        setPreviewStatus('synced', '已完成');
+
+        // 触发预览
+        await fetch(API_BASE + '/api/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown: data.article, style: currentStyle })
+        }).then(r => r.json()).then(d => {
+          currentPreviewHtml = d.html;
+          renderPreview(d.html);
+        });
       } catch (e) {
-        showState('error');
-        document.getElementById('error-msg').textContent = e.message;
+        setPreviewStatus('error', '生成失败');
+        showToast(e.message);
       }
     }
 
-    function showResult(data) {
-      showState('success');
-
+    function showLinkBar(data) {
       document.getElementById('preview-link').textContent = data.preview_url;
       document.getElementById('preview-link').href = data.preview_url;
       document.getElementById('open-btn').href = data.preview_url;
-
-      const badge = document.getElementById('style-badge');
-      badge.textContent = data.style_label;
-      const badgeColors = {
-        zen: { bg: '#f5f0e8', color: '#5c4a2a' },
-        minimal: { bg: '#e6f1fb', color: '#185fa5' },
-        tech: { bg: '#eef0f5', color: '#1a2d4a' },
-      };
-      const bc = badgeColors[data.style] || badgeColors.zen;
-      badge.style.background = bc.bg;
-      badge.style.color = bc.color;
+      document.getElementById('link-bar').classList.remove('hidden');
 
       const gradients = {
         zen: 'linear-gradient(135deg, #c8a96e 0%, #a07840 100%)',
@@ -545,21 +805,19 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       };
       document.getElementById('open-btn').style.background = gradients[data.style] || gradients.zen;
 
-      // 非AI模式隐藏文章编辑区
       if (currentMode !== 'ai') {
         document.getElementById('ai-article-section').classList.add('hidden');
         document.getElementById('ai-badge-result').classList.add('hidden');
       }
+
+      document.getElementById('copy-preview-btn').classList.remove('hidden');
     }
 
-    // 编辑 AI 文章后重新排版
     async function retypesetArticle() {
       const article = document.getElementById('ai-article-content').value.trim();
       if (!article) return;
 
-      showState('loading');
-      document.getElementById('loading-text').textContent = '正在重新排版...';
-      document.getElementById('loading-sub').textContent = '';
+      setPreviewStatus('loading', '重新排版中...');
 
       try {
         const res = await fetch(API_BASE + '/api/typeset', {
@@ -574,45 +832,40 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
         }
 
         const data = await res.json();
-        document.getElementById('preview-link').textContent = data.preview_url;
-        document.getElementById('preview-link').href = data.preview_url;
-        document.getElementById('open-btn').href = data.preview_url;
+        showLinkBar(data);
 
-        showState('success');
-        document.getElementById('ai-article-section').classList.remove('hidden');
-        document.getElementById('ai-badge-result').classList.remove('hidden');
+        const prevRes = await fetch(API_BASE + '/api/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown: article, style: currentStyle })
+        });
+        const prevData = await prevRes.json();
+        currentPreviewHtml = prevData.html;
+        renderPreview(prevData.html);
+        setPreviewStatus('synced', '已更新');
       } catch (e) {
-        showState('error');
-        document.getElementById('error-msg').textContent = e.message;
+        setPreviewStatus('error', '排版失败');
+        showToast(e.message);
       }
-    }
-
-    function getStyleLabel() {
-      return { zen:'禅意古朴', minimal:'极简现代', tech:'科技商务' }[currentStyle] || '';
     }
 
     async function copyLink() {
       const link = document.getElementById('preview-link').textContent;
       try {
         await navigator.clipboard.writeText(link);
-        const btn = document.getElementById('copy-btn-text');
-        btn.textContent = '已复制！';
-        btn.parentElement.classList.add('copy-success');
-        setTimeout(() => {
-          btn.textContent = '复制预览链接';
-          btn.parentElement.classList.remove('copy-success');
-        }, 2000);
+        showToast('已复制链接！');
       } catch {
         prompt('请手动复制链接：', link);
       }
     }
 
-    // Enter 快捷键（Ctrl/Cmd + Enter 生成）
+    // Enter 快捷键（Ctrl/Cmd + Enter 生成预览链接）
     document.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generate();
     });
 
-    // ── 反馈功能 ──
+    // ═══════════════ 反馈功能 ═══════════════
+
     function openFeedback() {
       document.getElementById('feedback-modal').classList.add('show');
       document.getElementById('feedback-content').focus();
@@ -623,12 +876,10 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       document.getElementById('feedback-content').value = '';
     }
 
-    // 点击遮罩关闭
     document.getElementById('feedback-modal').addEventListener('click', function(e) {
       if (e.target === this) closeFeedback();
     });
 
-    // ESC 关闭
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape' && document.getElementById('feedback-modal').classList.contains('show')) {
         closeFeedback();
@@ -668,25 +919,11 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 2500);
     }
+
+    // ═══════════════ 初始化 ═══════════════
+
+    setupImageUpload();
   </script>
-  <!-- 反馈按钮 -->
-  <button class="feedback-fab" onclick="openFeedback()" title="提建议">💬</button>
-
-  <!-- 反馈弹窗 -->
-  <div class="feedback-modal-overlay" id="feedback-modal">
-    <div class="feedback-modal">
-      <h3>💬 提个建议</h3>
-      <p>任何想法、建议或 bug 反馈，帮我把工具做得更好 🙏</p>
-      <textarea id="feedback-content" placeholder="说说你的想法...（例如：希望增加xxx功能、这里的体验不太好...）"></textarea>
-      <div class="modal-actions">
-        <button class="btn-cancel" onclick="closeFeedback()">取消</button>
-        <button class="btn-submit" id="feedback-submit-btn" onclick="submitFeedback()">提交</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Toast 提示 -->
-  <div class="feedback-toast" id="feedback-toast"></div>
 
 </body>
 </html>

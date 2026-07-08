@@ -1093,6 +1093,36 @@ class TypesetResponse(BaseModel):
     style_label: str
 
 
+class PreviewRequest(BaseModel):
+    markdown: str
+    style: str = "zen"
+
+
+class PreviewResponse(BaseModel):
+    html: str
+    style: str
+    style_label: str
+
+
+@app.post("/api/preview", response_model=PreviewResponse)
+async def preview(req: PreviewRequest):
+    """实时预览：返回排版后的 HTML，不经过 edit.shiker.tech API"""
+    if req.style not in STYLE_MAP:
+        raise HTTPException(400, f"style 必须是 zen / minimal / tech，收到：{req.style}")
+    if not req.markdown.strip():
+        return PreviewResponse(html="", style=req.style, style_label=STYLE_LABELS[req.style])
+
+    try:
+        html = build_html(req.markdown, req.style)
+        return PreviewResponse(
+            html=html,
+            style=req.style,
+            style_label=STYLE_LABELS[req.style],
+        )
+    except Exception as e:
+        raise HTTPException(500, f"预览失败：{str(e)}")
+
+
 @app.post("/api/typeset", response_model=TypesetResponse)
 async def typeset(req: TypesetRequest, request: Request):
     if req.style not in STYLE_MAP:
@@ -1287,6 +1317,42 @@ async def stats_page():
 
 
 # ── 用户反馈 ──
+
+# ── 图片上传 ──
+
+import base64
+
+UPLOAD_DIR = PROJECT_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+
+@app.post("/api/upload-image")
+async def upload_image(request: Request):
+    """上传图片，返回 base64 data URI"""
+    body = await request.body()
+    if len(body) == 0:
+        raise HTTPException(400, "未收到图片数据")
+
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("image/"):
+        raise HTTPException(400, "仅支持图片文件")
+
+    # 生成文件名并保存
+    ext = content_type.split("/")[-1].split(";")[0]
+    if ext == "jpeg":
+        ext = "jpg"
+    fname = f"{datetime.now().strftime('%Y%m%d%H%M%S%f')}.{ext}"
+    fpath = UPLOAD_DIR / fname
+
+    with open(fpath, "wb") as f:
+        f.write(body)
+
+    # 返回 base64 data URI
+    b64 = base64.b64encode(body).decode("utf-8")
+    data_uri = f"data:{content_type};base64,{b64}"
+
+    return {"data_uri": data_uri, "filename": fname}
+
 
 class FeedbackRequest(BaseModel):
     content: str           # 反馈内容
