@@ -55,15 +55,17 @@ PROJECT_DIR = Path(__file__).parent.resolve()
 TEMPLATES_DIR = PROJECT_DIR / "templates"
 
 STYLE_MAP = {
-    "zen":     TEMPLATES_DIR / "zen-classic.html",
-    "minimal": TEMPLATES_DIR / "minimal-modern.html",
-    "tech":    TEMPLATES_DIR / "tech-biz.html",
+    "zen":       TEMPLATES_DIR / "zen-classic.html",
+    "minimal":   TEMPLATES_DIR / "minimal-modern.html",
+    "tech":      TEMPLATES_DIR / "tech-biz.html",
+    "enterprise": TEMPLATES_DIR / "enterprise-blue.html",
 }
 
 STYLE_LABELS = {
-    "zen":     "禅意古朴",
-    "minimal": "极简现代",
-    "tech":    "科技商务",
+    "zen":       "禅意古朴",
+    "minimal":   "极简现代",
+    "tech":      "科技商务",
+    "enterprise": "科技蓝",
 }
 
 # ── 各风格配色与样式配置 ──
@@ -132,6 +134,28 @@ STYLE_CONFIG = {
         "blockquote_border": "#94a3b8",
         "ul_color": "#0d1b3e",
         "table_header_bg": "#1e40af",
+        "table_header_color": "#fff",
+        "table_border": "#e2e8f0",
+    },
+    "enterprise": {
+        "title_color": "#1e5bb5",
+        "text_color": "#334155",
+        "h2_color": "#1e5bb5",
+        "h3_color": "#2563eb",
+        "line_height": "1.85",
+        "font_size": "15px",
+        "cards": {
+            "intro":    {"bg": "#ffffff", "border": "#3b82f6", "label_color": "#1e5bb5"},   # 前言 - 白底蓝边
+            "quote":    {"bg": "#eff6ff", "border": "#93c5fd", "label_color": "#2563eb"},   # 引用
+            "insight":  {"bg": "#f0f9ff", "border": "#60a5fa", "label_color": "#0284c7"},   # 观点
+            "practice": {"bg": "#eff6ff", "border": "#3b82f6", "label_color": "#1e5bb5"},   # 实践
+            "tip":      {"bg": "#f8fafc", "border": "#cbd5e1", "label_color": "#64748b"},   # 提示
+            "summary":  {"bg": "#1e5bb5", "border": "#3b82f6", "label_color": "#ffffff"},   # 总结 - 蓝底白字
+        },
+        "blockquote_bg": "#ffffff",
+        "blockquote_border": "#3b82f6",
+        "ul_color": "#1e5bb5",
+        "table_header_bg": "#1e5bb5",
         "table_header_color": "#fff",
         "table_border": "#e2e8f0",
     },
@@ -860,23 +884,51 @@ def build_html(markdown_text: str, style: str) -> str:
             i += 1
             continue
 
-        # 二级标题 → 章节标题
+        # 二级标题 → 章节标题（支持 PART 分节语法：## PART 01: 标题）
         if line.startswith("## "):
             section_title = line[3:].strip()
-            content_parts.append(
-                f'<h2 style="font-size:17px;font-weight:500;color:{cfg["h2_color"]};'
-                f'margin:28px 0 12px;letter-spacing:1px;">{section_title}</h2>'
-            )
+            # 检测 PART 分节模式
+            part_match = re.match(r'^PART\s+(\d+)[\s:：]*(.+)$', section_title, re.IGNORECASE)
+            if part_match and style == "enterprise":
+                part_num = part_match.group(1)
+                part_title = part_match.group(2).strip()
+                content_parts.append(
+                    f'<div style="margin:32px 0 16px;position:relative;">'
+                    f'<div style="background:linear-gradient(135deg,#1e5bb5 0%,#3b82f6 100%);border-radius:0 8px 8px 0;padding:14px 20px;color:#fff;position:relative;">'
+                    f'<div style="font-size:13px;font-weight:600;opacity:0.9;margin-bottom:4px;letter-spacing:1px;">PART {part_num}</div>'
+                    f'<div style="font-size:16px;font-weight:600;letter-spacing:1px;">{part_title}</div>'
+                    f'</div>'
+                    f'<div style="height:2px;background:linear-gradient(to right,#3b82f6,#60a5fa,#93c5fd);border-radius:1px;margin-top:6px;"></div>'
+                    f'</div>'
+                )
+            else:
+                content_parts.append(
+                    f'<h2 style="font-size:17px;font-weight:500;color:{cfg["h2_color"]};'
+                    f'margin:28px 0 12px;letter-spacing:1px;">{section_title}</h2>'
+                )
             i += 1
             continue
 
-        # 三级标题 → 小节标题
+        # 三级标题 → 小节标题（支持序号标题：### 01: 标题）
         if line.startswith("### "):
             sub = line[4:].strip()
-            content_parts.append(
-                f'<h3 style="font-size:15px;font-weight:500;color:{cfg["h3_color"]};'
-                f'margin:18px 0 8px;">{sub}</h3>'
-            )
+            # 检测序号标题模式：01: 标题
+            num_match = re.match(r'^(\d{1,2})[\s:：]+(.+)$', sub)
+            if num_match and style == "enterprise":
+                num = num_match.group(1)
+                sub_title = num_match.group(2).strip()
+                content_parts.append(
+                    f'<div style="display:flex;align-items:center;margin:20px 0 12px;gap:10px;">'
+                    f'<div style="background:linear-gradient(135deg,#3b82f6,#60a5fa);color:#fff;font-size:14px;font-weight:600;padding:4px 10px;border-radius:4px;min-width:28px;text-align:center;">{num}</div>'
+                    f'<div style="font-size:15px;font-weight:600;color:{cfg["h3_color"]};">{sub_title}</div>'
+                    f'<div style="margin-left:auto;color:#3b82f6;font-size:16px;">▸</div>'
+                    f'</div>'
+                )
+            else:
+                content_parts.append(
+                    f'<h3 style="font-size:15px;font-weight:500;color:{cfg["h3_color"]};'
+                    f'margin:18px 0 8px;">{sub}</h3>'
+                )
             i += 1
             continue
 

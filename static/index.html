@@ -13,6 +13,8 @@
     .minimal-btn.active, .minimal-btn:hover { background: #378add; color: #fff; border-color: #378add; }
     .tech-btn { background: #f0f4fa; border: 1.5px solid #4a6fa5; color: #1a2d4a; }
     .tech-btn.active, .tech-btn:hover { background: #1a2d4a; color: #f0a500; border-color: #1a2d4a; }
+    .enterprise-btn { background: #eff6ff; border: 1.5px solid #3b82f6; color: #1e5bb5; }
+    .enterprise-btn.active, .enterprise-btn:hover { background: #1e5bb5; color: #fff; border-color: #1e5bb5; }
     textarea { resize: vertical; }
     .preview-card { background: linear-gradient(135deg, #fdf8f0 0%, #f5f0e8 100%); }
     @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
@@ -125,7 +127,7 @@
         <p class="text-xs text-gray-400">AI 写作 · 智能排版 · 实时预览</p>
       </div>
     </div>
-    <div class="text-xs text-gray-400 hidden sm:block">支持禅意古朴 / 极简现代 / 科技商务</div>
+    <div class="text-xs text-gray-400 hidden sm:block">支持禅意古朴 / 极简现代 / 科技商务 / 科技蓝</div>
   </header>
 
   <main class="px-4 py-4">
@@ -187,6 +189,7 @@
               <button onclick="fillExample('zen')" class="text-xs text-amber-600 hover:text-amber-800 underline decoration-dotted">道德经感悟</button>
               <button onclick="fillExample('tech')" class="text-xs text-blue-600 hover:text-blue-800 underline decoration-dotted">技术分享</button>
               <button onclick="fillExample('minimal')" class="text-xs text-gray-600 hover:text-gray-800 underline decoration-dotted">生活随笔</button>
+              <button onclick="fillExample('enterprise')" class="text-xs text-blue-600 hover:text-blue-800 underline decoration-dotted">企业会议</button>
             </div>
           </div>
         </div>
@@ -234,7 +237,7 @@
         <!-- 风格选择（两个模式共用） -->
         <div class="px-5 pb-3 mt-auto">
           <p class="text-xs text-gray-500 mb-3 font-medium">选择排版风格</p>
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-4 gap-3">
 
             <button id="btn-zen" onclick="selectStyle('zen')" class="zen-btn active rounded-xl px-3 py-3 text-sm font-medium transition-all text-center">
               <div class="text-base mb-1">🪔</div>
@@ -252,6 +255,12 @@
               <div class="text-base mb-1">⬡</div>
               <div>科技商务</div>
               <div class="style-preview">深蓝 · 橙红 · 理性</div>
+            </button>
+
+            <button id="btn-enterprise" onclick="selectStyle('enterprise')" class="enterprise-btn rounded-xl px-3 py-3 text-sm font-medium transition-all text-center">
+              <div class="text-base mb-1">◆</div>
+              <div>科技蓝</div>
+              <div class="style-preview">企业 · 会议 · 新闻</div>
             </button>
 
           </div>
@@ -452,7 +461,27 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
 - 第三天开始，食物的味道变得清晰了
 - 两周后，饭桌变成了一天中最安静的时刻
 
-慢下来，不是退步，是找回被速度带走的那部分自己。`
+慢下来，不是退步，是找回被速度带走的那部分自己。`,
+
+      enterprise: `# 聚力科创 智启新篇
+
+> 前言：探索未来，触手可及！随着科技的飞速发展，我们生活的每一个角落都将变得不同寻常。
+
+## PART 01: 聚势融合 · 数字战略升级
+
+### 01: 聚势融合 · 数字战略升级
+
+探索未来，触手可及！随着科技的飞速发展，我们生活的每一个角落都将变得不同寻常。从智能家居到自动驾驶汽车，从虚拟现实到生物科技，科技创新正以前所未有的速度改变着我们的生活。
+
+### 02: 聚势融合 · 数字战略升级
+
+探索未来，触手可及！随着科技的飞速发展，我们生活的每一个角落都将变得不同寻常。从智能家居到自动驾驶汽车，从虚拟现实到生物科技。
+
+## PART 02: 聚势融合 · 数字战略升级
+
+### 01: 聚势融合 · 数字战略升级
+
+探索未来，触手可及！随着科技的飞速发展，我们生活的每一个角落都将变得不同寻常。从智能家居到自动驾驶汽车，从虚拟现实到生物科技，科技创新正以前所未有的速度改变着我们的生活。让我们一起迎接这个充满无限可能的未来！`
     };
 
     // ═══════════════ 实时预览 ═══════════════
@@ -783,7 +812,7 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
 
     function selectStyle(style) {
       currentStyle = style;
-      ['zen','minimal','tech'].forEach(s => {
+      ['zen','minimal','tech','enterprise'].forEach(s => {
         document.getElementById('btn-' + s).classList.remove('active');
       });
       document.getElementById('btn-' + style).classList.add('active');
@@ -792,16 +821,18 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
         zen: 'linear-gradient(135deg, #c8a96e 0%, #a07840 100%)',
         minimal: 'linear-gradient(135deg, #378add 0%, #185fa5 100%)',
         tech: 'linear-gradient(135deg, #1a2d4a 0%, #0c1e33 100%)',
+        enterprise: 'linear-gradient(135deg, #1e5bb5 0%, #3b82f6 100%)',
       };
       document.getElementById('generate-btn').style.background = gradients[style];
 
       // 更新徽章
       const badge = document.getElementById('style-badge');
-      const labels = { zen:'禅意古朴', minimal:'极简现代', tech:'科技商务' };
+      const labels = { zen:'禅意古朴', minimal:'极简现代', tech:'科技商务', enterprise:'科技蓝' };
       const badgeColors = {
         zen: { bg: '#f5f0e8', color: '#5c4a2a' },
         minimal: { bg: '#e6f1fb', color: '#185fa5' },
         tech: { bg: '#eef0f5', color: '#1a2d4a' },
+        enterprise: { bg: '#eff6ff', color: '#1e5bb5' },
       };
       badge.textContent = labels[style];
       const bc = badgeColors[style];
