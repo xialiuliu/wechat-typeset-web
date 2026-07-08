@@ -86,6 +86,26 @@
     .upload-progress { position: absolute; bottom: 8px; right: 8px; background: #5c4a2a; color: #fff;
       padding: 4px 10px; border-radius: 8px; font-size: 11px; display: none; z-index: 20; }
     .upload-progress.show { display: block; }
+
+    /* 复制按钮反馈 */
+    #copy-top-btn.copied { background: #3B6D11 !important; }
+
+    /* ── 移动端适配 ── */
+    @media (max-width: 768px) {
+      main { padding: 8px !important; }
+      .grid { grid-template-columns: 1fr !important; gap: 8px !important; }
+      .preview-container { height: 60vh; min-height: 350px; }
+      header { padding: 10px 12px !important; }
+      header h1 { font-size: 13px !important; }
+      header p { display: none; }
+      header > div:last-child { display: none; }
+      .mode-tab { padding: 6px 10px; font-size: 12px; }
+      textarea { font-size: 15px !important; } /* 避免 iOS 缩放 */
+      #markdown-input { height: 200px; }
+      .feedback-fab { bottom: 16px; right: 16px; width: 42px; height: 42px; font-size: 18px; }
+      .feedback-modal { width: 95%; padding: 16px; }
+      #generate-btn, #copy-preview-btn { padding: 10px 12px; font-size: 13px; }
+    }
   </style>
 </head>
 <body class="min-h-screen">
@@ -536,6 +556,7 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
     // ── 复制预览 HTML ──
     async function copyPreviewHtml() {
       if (!currentPreviewHtml) return;
+      const btn = document.getElementById('copy-top-btn');
       try {
         // 用 Clipboard API 写入 HTML 格式
         const blob = new Blob([currentPreviewHtml], { type: 'text/html' });
@@ -544,6 +565,15 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
           'text/plain': new Blob([getInputText()], { type: 'text/plain' })
         });
         await navigator.clipboard.write([item]);
+
+        // 按钮反馈
+        btn.textContent = '已复制 ✓';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = '复制';
+          btn.classList.remove('copied');
+        }, 2000);
+
         showToast('已复制！可直接粘贴到公众号编辑器');
       } catch {
         // 降级方案：复制到不可见元素后手动复制
@@ -600,9 +630,13 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
 
         showUploadProgress(true);
         try {
-          const dataUri = await uploadImage(file);
+          // 压缩图片后再转为 data URI
+          const compressed = await compressImage(file);
+          const dataUri = compressed.dataUri;
+          const sizeBefore = (file.size / 1024).toFixed(0);
+          const sizeAfter = (compressed.size / 1024).toFixed(0);
           insertAtCursor(ta, `\n![](${dataUri})\n`);
-          showToast('图片已嵌入');
+          showToast(`图片已嵌入${sizeBefore !== sizeAfter ? `（${sizeBefore}KB → ${sizeAfter}KB）` : ''}`);
           triggerPreview();
         } catch (e) {
           showToast('图片上传失败: ' + e.message);
@@ -611,20 +645,58 @@ WorkBuddy Skill + Automation 覆盖 80% 场景。
       }
     }
 
-    async function uploadImage(file) {
-      const res = await fetch(API_BASE + '/api/upload-image', {
-        method: 'POST',
-        headers: { 'Content-Type': file.type },
-        body: file
+    // 压缩图片：最大宽1200px，质量0.7，转JPEG
+    function compressImage(file) {
+      return new Promise((resolve, reject) => {
+        // GIF 不压缩，原样返回
+        if (file.type === 'image/gif') {
+          const reader = new FileReader();
+          reader.onload = () => resolve({ dataUri: reader.result, size: file.size });
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+          return;
+        }
+
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const maxW = 1200;
+          let w = img.width, h = img.height;
+
+          // 如果原图小于最大宽度，用原生尺寸但压制质量
+          let canvas = document.createElement('canvas');
+          if (w > maxW) {
+            h = Math.round(h * maxW / w);
+            w = maxW;
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+
+          const dataUri = canvas.toDataURL('image/jpeg', 0.7);
+          // 估算压缩后大小
+          const size = Math.round(dataUri.length * 0.75); // base64 → 原始约75%
+          resolve({ dataUri, size });
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error('图片加载失败'));
+        };
+        img.src = url;
       });
+    }
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || '上传失败');
-      }
-
-      const data = await res.json();
-      return data.data_uri;
+    // 删除原来的 uploadImage 函数，不再需要
+    async function uploadImage(file) {
+      const reader = new FileReader();
+      return new Promise((resolve, reject) => {
+        reader.onload = () => resolve({ data_uri: reader.result });
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
     }
 
     function showUploadProgress(show) {
